@@ -1,317 +1,149 @@
-import { useState, useCallback } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import Sidebar from "@/components/Sidebar";
-import { FileUpload } from "@/components/FileUpload";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { useToast } from "@/components/ui/use-toast";
-import { format } from "date-fns";
-import { debounce } from "lodash";
-import { useAuth } from "@/context/AuthContext";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import ScanActions from "@/components/ScanActions";
+import React, { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useDropzone } from 'react-dropzone';
+import { scans } from '../services/scans';
+import AIAnalysis from '../components/AIAnalysis';
 
-interface Patient {
-  id: number;
-  fullName: string;
-}
-
-interface Scan {
-  id: number;
-  patientId: number;
-  patientName: string;
-  fileName: string;
-  fileType: string;
-  fileUrl: string;
-  status: "pending" | "processing" | "completed" | "failed";
-  createdAt: string;
-  updatedAt: string;
-}
-
-type ScanStatus = Scan["status"];
-
-export default function Scans() {
-  const [searchTerm, setSearchTerm] = useState("");
-  const [statusFilter, setStatusFilter] = useState<ScanStatus | "all">("all");
-  const [isUploadOpen, setIsUploadOpen] = useState(false);
-  const [selectedPatient, setSelectedPatient] = useState<string>("");
+const Scans: React.FC = () => {
+  const [selectedPatientId, setSelectedPatientId] = useState('');
+  const [selectedScanId, setSelectedScanId] = useState<string | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const queryClient = useQueryClient();
-  const { toast } = useToast();
 
-  // Fetch scans with search and filter
-  const { data: scans = [], isLoading } = useQuery<Scan[]>({
-    queryKey: ["/api/scans", { search: searchTerm, status: statusFilter }],
+  const { data: patients = [], isLoading: isLoadingPatients } = useQuery({
+    queryKey: ['patients'],
     queryFn: async () => {
-      const params = new URLSearchParams();
-      if (searchTerm) params.append("search", searchTerm);
-      if (statusFilter !== "all") params.append("status", statusFilter);
-      
-      const res = await fetch(`/api/scans?${params.toString()}`, {
-        credentials: "include",
-      });
-      if (!res.ok) throw new Error("Failed to fetch scans");
-      return res.json();
-    },
-  });
-
-  // Fetch patients for the select dropdown
-  const { data: patients = [], error: patientsError } = useQuery<Patient[]>({
-    queryKey: ["/api/patients"],
-    queryFn: async () => {
-      const res = await fetch("/api/patients", { credentials: "include" });
-      if (!res.ok) throw new Error("Failed to fetch patients");
-      return res.json();
-    },
-  });
-
-  // Debounced search handler
-  const debouncedSearch = useCallback(
-    debounce((value: string) => {
-      setSearchTerm(value);
-    }, 300),
-    []
-  );
-
-  // Format date helper
-  const formatDate = (date: string) => {
-    return format(new Date(date), "MMM d, yyyy");
-  };
-
-  // Upload mutation
-  const uploadMutation = useMutation<Scan[], Error, File[]>({
-    mutationFn: async (files) => {
-      if (!selectedPatient) {
-        throw new Error("Please select a patient");
-      }
-
-      const formData = new FormData();
-      formData.append("patientId", selectedPatient);
-      files.forEach((file) => {
-        formData.append("files", file);
-      });
-
-      const response = await fetch("/api/scans/upload", {
-        method: "POST",
-        body: formData,
-        credentials: "include",
-      });
-
+      const response = await fetch('http://localhost:3001/api/patients');
       if (!response.ok) {
-        throw new Error("Failed to upload files");
+        throw new Error('Failed to fetch patients');
       }
-
       return response.json();
     },
+  });
+
+  const { data: scansList = [], isLoading: isLoadingScans } = useQuery({
+    queryKey: ['scans', selectedPatientId],
+    queryFn: () => selectedPatientId ? scans.getAll(selectedPatientId) : [],
+    enabled: !!selectedPatientId,
+  });
+
+  const uploadMutation = useMutation({
+    mutationFn: (file: File) => scans.upload(selectedPatientId, file),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/scans"] });
-      setIsUploadOpen(false);
-      setSelectedPatient("");
-      toast({
-        title: "Success",
-        description: "Files uploaded successfully",
-      });
+      queryClient.invalidateQueries({ queryKey: ['scans', selectedPatientId] });
+      setUploadError(null);
     },
-    onError: (error) => {
-      toast({
-        title: "Error",
-        description: error.message,
-        variant: "destructive",
-      });
+    onError: (error: any) => {
+      setUploadError(error.message || 'Failed to upload scan');
     },
   });
 
-  const handleUpload = async (files: File[]) => {
-    await uploadMutation.mutateAsync(files);
-  };
-
-  const handleScanDeleted = () => {
-    queryClient.invalidateQueries({ queryKey: ["/api/scans"] });
-  };
-
-  const handleReportGenerated = () => {
-    queryClient.invalidateQueries({ queryKey: ["/api/scans"] });
-  };
-
-  const getStatusClass = (status: ScanStatus) => {
-    switch (status) {
-      case "completed":
-        return "text-green-600";
-      case "processing":
-        return "text-blue-600";
-      case "failed":
-        return "text-red-600";
-      default:
-        return "text-gray-600";
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop: (acceptedFiles) => {
+      if (acceptedFiles.length > 0) {
+        const file = acceptedFiles[0];
+        if (file.size > 10 * 1024 * 1024) { // 10MB limit
+          setUploadError('File size must be less than 10MB');
+          return;
+        }
+        uploadMutation.mutate(file);
+      }
+    },
+    accept: {
+      'image/*': ['.png', '.jpg', '.jpeg', '.dicom']
     }
-  };
+  });
+
+  if (isLoadingPatients) {
+    return <div className="text-center py-4">Loading patients...</div>;
+  }
 
   return (
-    <div className="flex min-h-screen h-screen overflow-hidden bg-neutral-100">
-      <Sidebar />
-      <main className="flex-1 overflow-y-auto">
-        {/* Header */}
-        <header className="bg-white border-b border-neutral-200 p-6">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between">
-            <div>
-              <h1 className="text-2xl font-bold text-neutral-800">Dental Scans</h1>
-              <p className="text-neutral-500 mt-1">
-                Manage and analyze your dental scans
-              </p>
-            </div>
-            <div className="mt-4 md:mt-0">
-              <Dialog open={isUploadOpen} onOpenChange={setIsUploadOpen}>
-                <DialogTrigger asChild>
-                  <Button>
-                    <i className="fas fa-plus mr-2" aria-hidden="true" />
-                    Upload Scans
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="sm:max-w-2xl">
-                  <DialogHeader>
-                    <DialogTitle>Upload Dental Scans</DialogTitle>
-                  </DialogHeader>
-                  <div className="space-y-4">
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium text-neutral-700">
-                        Select Patient
-                      </label>
-                      <Select
-                        value={selectedPatient}
-                        onValueChange={setSelectedPatient}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select a patient" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {patients.map((patient: Patient) => (
-                            <SelectItem key={patient.id} value={String(patient.id)}>
-                              {patient.fullName}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <FileUpload onUpload={handleUpload} />
-                  </div>
-                </DialogContent>
-              </Dialog>
-            </div>
-          </div>
-        </header>
+    <div className="container mx-auto px-4 py-8">
+      <h1 className="text-2xl font-bold mb-6">Dental Scans</h1>
 
-        {/* Content */}
-        <div className="p-6">
-          {/* Search and Filter */}
-          <div className="flex flex-col md:flex-row gap-4 mb-6">
-            <div className="mt-4 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-neutral-700 mb-1">
-                  Search Patient
-                </label>
-                <Input
-                  name="search"
-                  type="text"
-                  placeholder="Search by patient name or scan ID..."
-                  onChange={(e) => debouncedSearch(e.target.value)}
+      <div className="mb-8">
+        <label className="block text-sm font-medium text-gray-700 mb-2">
+          Select Patient
+        </label>
+        <select
+          value={selectedPatientId}
+          onChange={(e) => setSelectedPatientId(e.target.value)}
+          className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+        >
+          <option value="">Select a patient</option>
+          {Array.isArray(patients) && patients.map((patient: any) => (
+            <option key={patient._id} value={patient._id}>
+              {patient.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {selectedPatientId && (
+        <div className="mb-8">
+          <div
+            {...getRootProps()}
+            className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer
+              ${isDragActive ? 'border-blue-500 bg-blue-50' : 'border-gray-300'}`}
+          >
+            <input {...getInputProps()} />
+            {isDragActive ? (
+              <p className="text-blue-500">Drop the scan here...</p>
+            ) : (
+              <p className="text-gray-600">Drag and drop a scan here, or click to select</p>
+            )}
+          </div>
+          {uploadError && (
+            <p className="mt-2 text-sm text-red-600">{uploadError}</p>
+          )}
+          {uploadMutation.isPending && (
+            <p className="mt-2 text-sm text-blue-600">Uploading scan...</p>
+          )}
+        </div>
+      )}
+
+      {isLoadingScans ? (
+        <div className="text-center py-4">Loading scans...</div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {Array.isArray(scansList) && scansList.map((scan: any) => (
+            <div
+              key={scan._id}
+              className="bg-white shadow rounded-lg p-6 cursor-pointer hover:shadow-md transition-shadow"
+              onClick={() => setSelectedScanId(scan._id)}
+            >
+              <div className="aspect-w-16 aspect-h-9 mb-4">
+                <img
+                  src={`http://localhost:3001/api/scans/${scan._id}/image`}
+                  alt="Dental scan"
+                  className="object-cover rounded-lg"
                 />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-neutral-700 mb-1">
-                  Filter by Status
-                </label>
-                <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select status" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All</SelectItem>
-                    <SelectItem value="pending">Pending</SelectItem>
-                    <SelectItem value="processing">Processing</SelectItem>
-                    <SelectItem value="completed">Completed</SelectItem>
-                    <SelectItem value="failed">Failed</SelectItem>
-                  </SelectContent>
-                </Select>
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-gray-500">
+                  {new Date(scan.createdAt).toLocaleDateString()}
+                </span>
+                <span className={`px-2 py-1 rounded-full text-xs ${
+                  scan.status === 'analyzed' ? 'bg-green-100 text-green-800' :
+                  scan.status === 'processing' ? 'bg-yellow-100 text-yellow-800' :
+                  'bg-gray-100 text-gray-800'
+                }`}>
+                  {scan.status}
+                </span>
               </div>
             </div>
-          </div>
-
-          {/* Scans Table */}
-          <div className="bg-white rounded-lg border border-neutral-200">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Patient Name</TableHead>
-                  <TableHead>File Name</TableHead>
-                  <TableHead>Upload Date</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {isLoading ? (
-                  <TableRow>
-                    <TableCell colSpan={5} className="text-center py-8">
-                      <i className="fas fa-spinner fa-spin text-2xl text-primary-600"></i>
-                      <p className="text-neutral-600 mt-2">Loading scans...</p>
-                    </TableCell>
-                  </TableRow>
-                ) : scans.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={5} className="text-center py-8">
-                      <p className="text-neutral-600">No scans found</p>
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  scans.map((scan: any) => (
-                    <TableRow key={scan.id}>
-                      <TableCell>{scan.patientName}</TableCell>
-                      <TableCell>{scan.fileName}</TableCell>
-                      <TableCell>{formatDate(scan.createdAt)}</TableCell>
-                      <TableCell>
-                        <span
-                          className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusClass(
-                            scan.status
-                          )}`}
-                        >
-                          {scan.status.charAt(0).toUpperCase() + scan.status.slice(1)}
-                        </span>
-                      </TableCell>
-                      <TableCell>
-                        <ScanActions
-                          scan={scan}
-                          onScanDeleted={handleScanDeleted}
-                          onReportGenerated={handleReportGenerated}
-                        />
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </div>
+          ))}
         </div>
-      </main>
+      )}
+
+      {selectedScanId && (
+        <div className="mt-8">
+          <AIAnalysis scanId={selectedScanId} />
+        </div>
+      )}
     </div>
   );
-} 
+};
+
+export default Scans; 

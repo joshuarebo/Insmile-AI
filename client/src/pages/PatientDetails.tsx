@@ -1,140 +1,247 @@
-import React, { useState } from 'react';
-import { useParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { Patient, Scan } from '@/types/schema';
-import { Button } from '@/components/ui/button';
-import { formatDate } from '@/lib/utils';
-import PatientManagement from '../components/PatientManagement';
-import DentalScanUpload from '../components/DentalScanUpload';
-import TreatmentPlan from '../components/TreatmentPlan';
+import React, { useState, useEffect } from 'react';
+import { useParams, Link } from 'react-router-dom';
+import axios from 'axios';
+import { Tabs, Tab, Box, Typography, Button, Card, CardContent, CircularProgress, Alert } from '@mui/material';
+import { ScanUploader } from '../components/ScanUploader';
+import AIAnalysis from '../components/AIAnalysis';
+import { ChatAssistant } from '../components/ChatAssistant';
+import { TreatmentPlan } from '../components/TreatmentPlan';
 
-const PatientDetails: React.FC = () => {
-  const { patientId } = useParams<{ patientId: string }>();
+interface Patient {
+  _id: string;
+  name: string;
+  email: string;
+  phone: string;
+  dateOfBirth: string;
+}
+
+interface Scan {
+  _id: string;
+  id: string;
+  patientId: string;
+  createdAt: string;
+  filename: string;
+}
+
+const PatientDetails = () => {
+  const { id } = useParams<{ id: string }>();
+  const [patient, setPatient] = useState<Patient | null>(null);
+  const [scans, setScans] = useState<Scan[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState(0);
   const [selectedScanId, setSelectedScanId] = useState<string | null>(null);
+  const [showAnalysisComponent, setShowAnalysisComponent] = useState(false);
 
-  const { data: patient, isLoading: isLoadingPatient } = useQuery({
-    queryKey: ['patient', patientId],
-    queryFn: async () => {
-      const response = await fetch(`/api/patients/${patientId}`);
-      if (!response.ok) {
-        throw new Error('Failed to fetch patient details');
+  // Fetch patient details
+  useEffect(() => {
+    const fetchPatient = async () => {
+      try {
+        const response = await axios.get(`http://localhost:3001/api/patients/${id}`);
+        setPatient(response.data);
+      } catch (err: any) {
+        setError(err.message || 'Failed to fetch patient details');
       }
-      return response.json();
-    },
-    enabled: !!patientId,
-  });
+    };
 
-  const { data: scans, isLoading: isLoadingScans } = useQuery({
-    queryKey: ['scans', patientId],
-    queryFn: async () => {
-      const response = await fetch(`/api/patients/${patientId}/scans`);
-      if (!response.ok) {
-        throw new Error('Failed to fetch patient scans');
+    const fetchScans = async () => {
+      try {
+        const response = await axios.get(`http://localhost:3001/api/scans/patient/${id}`);
+        setScans(response.data);
+      } catch (err: any) {
+        console.error('Error fetching scans:', err);
+        // Don't set error here so the page can still load
+      } finally {
+        setLoading(false);
       }
-      return response.json();
-    },
-    enabled: !!patientId,
-  });
+    };
 
-  if (isLoadingPatient || isLoadingScans) {
-    return <div>Loading...</div>;
+    if (id) {
+      fetchPatient();
+      fetchScans();
+    }
+  }, [id]);
+
+  // When a scan is uploaded, refresh the scans list
+  const handleScanUploaded = (scanId: string) => {
+    setSelectedScanId(scanId);
+    setShowAnalysisComponent(true);
+    
+    // Refresh the scan list
+    axios.get(`http://localhost:3001/api/scans/patient/${id}`)
+      .then(response => {
+        setScans(response.data);
+        setActiveTab(1); // Switch to the Analysis tab
+      })
+      .catch(err => {
+        console.error('Error refreshing scans:', err);
+      });
+  };
+
+  const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
+    setActiveTab(newValue);
+  };
+
+  const handleScanSelect = (scanId: string) => {
+    setSelectedScanId(scanId);
+    setShowAnalysisComponent(true);
+    setActiveTab(1); // Switch to the Analysis tab
+  };
+
+  if (loading) {
+    return (
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  if (error) {
+    return (
+      <Alert severity="error">
+        {error}
+        <Button component={Link} to="/patients" sx={{ ml: 2 }}>
+          Back to Patients
+        </Button>
+      </Alert>
+    );
   }
 
   if (!patient) {
-    return <div>Patient not found</div>;
+    return (
+      <Alert severity="warning">
+        Patient not found
+        <Button component={Link} to="/patients" sx={{ ml: 2 }}>
+          Back to Patients
+        </Button>
+      </Alert>
+    );
   }
 
   return (
     <div className="container mx-auto px-4 py-8">
-      <div className="bg-white rounded-lg shadow p-6">
-        <div className="flex justify-between items-start mb-6">
-          <div>
-            <h1 className="text-3xl font-bold mb-2">{patient.name}</h1>
-            <div className="grid grid-cols-2 gap-4 text-sm text-gray-600">
-              <div>
-                <span className="font-medium">DOB:</span> {formatDate(patient.dateOfBirth)}
-              </div>
-              <div>
-                <span className="font-medium">Gender:</span> {patient.gender}
-              </div>
-              <div>
-                <span className="font-medium">Phone:</span> {patient.phone}
-              </div>
-              <div>
-                <span className="font-medium">Email:</span> {patient.email}
-              </div>
+      <Box mb={4} display="flex" justifyContent="space-between" alignItems="center">
+        <Typography variant="h4">{patient.name}</Typography>
+        <Button component={Link} to="/patients" variant="outlined">
+          Back to Patients
+        </Button>
+      </Box>
+      
+      <Card sx={{ mb: 4 }}>
+        <CardContent>
+          <Typography variant="h6" gutterBottom>Patient Information</Typography>
+          <Box display="grid" gridTemplateColumns={{ xs: '1fr', md: '1fr 1fr' }} gap={2}>
+            <div>
+              <Typography variant="subtitle2" color="text.secondary">Email</Typography>
+              <Typography>{patient.email}</Typography>
             </div>
-          </div>
-          <Button variant="outline">Edit Patient</Button>
-        </div>
-
-        <div className="mt-8">
-          <h2 className="text-2xl font-bold mb-4">Scans</h2>
-          {scans && scans.length > 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {scans.map((scan) => (
-                <div key={scan.id} className="bg-gray-50 rounded-lg p-4">
-                  <h3 className="font-semibold mb-2">{scan.fileName}</h3>
-                  <div className="text-sm text-gray-600">
-                    <p>Status: {scan.status}</p>
-                    <p>Date: {formatDate(scan.createdAt)}</p>
-                  </div>
-                  <div className="mt-4">
-                    <Button variant="outline" size="sm">
-                      View Details
-                    </Button>
-                  </div>
-                </div>
-              ))}
+            <div>
+              <Typography variant="subtitle2" color="text.secondary">Phone</Typography>
+              <Typography>{patient.phone}</Typography>
             </div>
-          ) : (
-            <p className="text-gray-600">No scans found for this patient.</p>
-          )}
-        </div>
-      </div>
+            <div>
+              <Typography variant="subtitle2" color="text.secondary">Date of Birth</Typography>
+              <Typography>{new Date(patient.dateOfBirth).toLocaleDateString()}</Typography>
+            </div>
+          </Box>
+        </CardContent>
+      </Card>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <div>
-          <h2 className="text-2xl font-bold mb-4">Dental Scans</h2>
-          <DentalScanUpload patientId={patientId!} />
+      <Box sx={{ width: '100%' }}>
+        <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
+          <Tabs value={activeTab} onChange={handleTabChange} aria-label="patient tabs">
+            <Tab label="Dental Scans" />
+            <Tab label="AI Analysis" disabled={!selectedScanId && !showAnalysisComponent} />
+            <Tab label="Treatment Plan" disabled={!selectedScanId} />
+            <Tab label="Chat Assistant" />
+          </Tabs>
+        </Box>
+
+        {/* Scans Tab */}
+        <Box sx={{ py: 3 }} hidden={activeTab !== 0}>
+          <Typography variant="h6" gutterBottom>
+            Upload New Scan
+          </Typography>
+          <ScanUploader patientId={id!} onScanUploaded={handleScanUploaded} />
           
-          {scans && scans.length > 0 && (
-            <div className="mt-8">
-              <h3 className="text-xl font-semibold mb-4">Previous Scans</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {scans.map((scan) => (
-                  <div
-                    key={scan.id}
-                    className={`border rounded-lg p-4 cursor-pointer transition-colors
-                      ${selectedScanId === scan.id ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-blue-300'}`}
-                    onClick={() => setSelectedScanId(scan.id)}
-                  >
-                    <img
-                      src={scan.imageUrl}
-                      alt={scan.fileName}
-                      className="w-full h-48 object-cover rounded mb-2"
-                    />
-                    <p className="text-sm font-medium">{scan.fileName}</p>
-                    <p className="text-xs text-gray-500">
-                      {new Date(scan.createdAt).toLocaleDateString()}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div>
-          {selectedScanId ? (
-            <TreatmentPlan patientId={patientId!} scanId={selectedScanId} />
+          <Typography variant="h6" gutterBottom sx={{ mt: 4 }}>
+            Available Scans
+          </Typography>
+          
+          {scans.length === 0 ? (
+            <Alert severity="info">No scans available for this patient yet.</Alert>
           ) : (
-            <div className="bg-gray-50 rounded-lg p-6 text-center text-gray-500">
-              <p>Select a scan to view or generate a treatment plan</p>
-            </div>
+            <Box display="grid" gridTemplateColumns={{ xs: '1fr', sm: '1fr 1fr', md: '1fr 1fr 1fr' }} gap={2}>
+              {scans.map(scan => (
+                <Card 
+                  key={scan._id || scan.id} 
+                  variant="outlined" 
+                  sx={{ 
+                    cursor: 'pointer',
+                    border: selectedScanId === (scan._id || scan.id) ? '2px solid #1976d2' : undefined
+                  }}
+                  onClick={() => handleScanSelect(scan._id || scan.id)}
+                >
+                  <CardContent>
+                    <Typography variant="body2" color="text.secondary">
+                      {new Date(scan.createdAt).toLocaleString()}
+                    </Typography>
+                    <Box sx={{ mt: 2, textAlign: 'center' }}>
+                      <img 
+                        src={`http://localhost:3001/api/scans/${scan._id || scan.id}/image`}
+                        alt="Dental scan" 
+                        style={{ maxHeight: 150, maxWidth: '100%', objectFit: 'contain' }}
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src = '/placeholder-scan.jpg';
+                        }}
+                      />
+                    </Box>
+                    <Button 
+                      variant="contained" 
+                      size="small" 
+                      fullWidth 
+                      sx={{ mt: 2 }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleScanSelect(scan._id || scan.id);
+                      }}
+                    >
+                      Analyze
+                    </Button>
+                  </CardContent>
+                </Card>
+              ))}
+            </Box>
           )}
-        </div>
-      </div>
+        </Box>
+
+        {/* Analysis Tab */}
+        <Box sx={{ py: 3 }} hidden={activeTab !== 1}>
+          {selectedScanId ? (
+            <AIAnalysis scanId={selectedScanId} patientId={id} />
+          ) : (
+            <Alert severity="info">
+              Please select a scan first to view AI analysis.
+            </Alert>
+          )}
+        </Box>
+
+        {/* Treatment Plan Tab */}
+        <Box sx={{ py: 3 }} hidden={activeTab !== 2}>
+          {selectedScanId ? (
+            <TreatmentPlan patientId={id!} />
+          ) : (
+            <Alert severity="info">
+              Please select a scan first to view treatment plan.
+            </Alert>
+          )}
+        </Box>
+
+        {/* Chat Assistant Tab */}
+        <Box sx={{ py: 3 }} hidden={activeTab !== 3}>
+          <ChatAssistant patientId={id!} />
+        </Box>
+      </Box>
     </div>
   );
 };

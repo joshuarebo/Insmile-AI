@@ -1,168 +1,144 @@
-import { useState, useEffect } from "react";
-import { Link } from "wouter";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { loginSchema } from "@/types/schema";
-import { useAuth } from "@/context/AuthContext";
-import { useToast } from "@/hooks/use-toast";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from "@/components/ui/form";
-import { Input } from "@/components/ui/input";
+import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import axios from 'axios';
 
-export default function Login() {
-  const { login, isLoading } = useAuth();
-  const { toast } = useToast();
-  const [error, setError] = useState<string | null>(null);
+const Login: React.FC = () => {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const navigate = useNavigate();
 
-  useEffect(() => {
-    // Check if user just registered successfully
-    const registrationSuccess = sessionStorage.getItem('registrationSuccess');
-    if (registrationSuccess) {
-      // Clear the flag
-      sessionStorage.removeItem('registrationSuccess');
-      // Show welcome message
-      toast({
-        title: "Welcome to Insmile AI!",
-        description: "Registration successful. Please log in with your credentials.",
-      });
-    }
-  }, [toast]);
+  // Demo credentials for easy access
+  const handleDemoLogin = () => {
+    setEmail('demo@example.com');
+    setPassword('password123');
+  };
 
-  const form = useForm({
-    resolver: zodResolver(loginSchema),
-    defaultValues: {
-      username: "",
-      password: "",
-    },
-  });
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
 
-  const onSubmit = async (data: any) => {
-    setError(null);
     try {
-      await login(data);
-    } catch (err) {
-      setError("Login failed. Please check your credentials and try again.");
+      // For demo purposes, we'll accept any login
+      // In a real app, this would validate credentials against the server
+      if (email && password) {
+        // Save login state to localStorage
+        localStorage.setItem('isLoggedIn', 'true');
+        localStorage.setItem('user', JSON.stringify({ 
+          email, 
+          name: email.split('@')[0]
+        }));
+        
+        // Navigate to the dashboard or patients page
+        navigate('/patients');
+      } else {
+        setError('Please enter both email and password');
+      }
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Login failed. Please try again.');
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-neutral-100 px-4 py-8">
-      <Card className="w-full max-w-md">
-        <CardHeader className="space-y-1">
-          <div className="flex items-center justify-center mb-6">
-            <img
-              src="https://images.unsplash.com/photo-1609840112990-4265448268d1?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=64&h=64"
-              alt="Insmile AI Logo"
-              className="w-16 h-16 rounded-lg mr-4"
-            />
-            <h1 className="text-2xl font-bold text-primary-600">Insmile AI</h1>
-          </div>
-          <CardTitle className="text-xl">Login to your account</CardTitle>
-          <CardDescription>
-            Enter your credentials to access the dashboard
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {error && (
-            <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-md text-sm">
-              {error}
+    <div className="min-h-screen flex items-center justify-center bg-gray-100 py-12 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-md w-full space-y-8">
+        <div>
+          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
+            InsmileAI Dental Platform
+          </h2>
+          <p className="mt-2 text-center text-sm text-gray-600">
+            Sign in to access your dental AI assistant
+          </p>
+        </div>
+        
+        {error && (
+          <div className="bg-red-50 border-l-4 border-red-400 p-4">
+            <div className="flex">
+              <div className="flex-shrink-0">
+                <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                </svg>
+              </div>
+              <div className="ml-3">
+                <p className="text-sm text-red-700">{error}</p>
+              </div>
             </div>
-          )}
-
-          <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-              <FormField
-                control={form.control}
-                name="username"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Username</FormLabel>
-                    <FormControl>
-                      <Input placeholder="Enter your username" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
+          </div>
+        )}
+        
+        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
+          <div className="rounded-md shadow-sm -space-y-px">
+            <div>
+              <label htmlFor="email-address" className="sr-only">Email address</label>
+              <input
+                id="email-address"
+                name="email"
+                type="email"
+                autoComplete="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
+                placeholder="Email address"
               />
-
-              <FormField
-                control={form.control}
+            </div>
+            <div>
+              <label htmlFor="password" className="sr-only">Password</label>
+              <input
+                id="password"
                 name="password"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Password</FormLabel>
-                    <FormControl>
-                      <Input
-                        type="password"
-                        placeholder="Enter your password"
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
+                type="password"
+                autoComplete="current-password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
+                placeholder="Password"
               />
+            </div>
+          </div>
 
-              <Button
-                type="submit"
-                className="w-full"
-                disabled={isLoading}
-              >
-                {isLoading ? (
-                  <span className="flex items-center">
-                    <i className="fas fa-spinner fa-spin mr-2"></i> Logging in...
-                  </span>
-                ) : (
-                  "Login"
-                )}
-              </Button>
-            </form>
-          </Form>
-        </CardContent>
-        <CardFooter className="flex flex-col space-y-4">
-          <div className="text-sm text-center">
-            <p>
-              Don't have an account?{" "}
-              <Link href="/register">
-                <a className="text-primary-600 hover:text-primary-700 font-medium">
-                  Register
-                </a>
-              </Link>
-            </p>
+          <div>
+            <button
+              type="submit"
+              disabled={loading}
+              className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+            >
+              {loading ? (
+                <span className="absolute left-0 inset-y-0 flex items-center pl-3">
+                  <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                </span>
+              ) : (
+                <span className="absolute left-0 inset-y-0 flex items-center pl-3">
+                  <svg className="h-5 w-5 text-blue-500 group-hover:text-blue-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                    <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
+                  </svg>
+                </span>
+              )}
+              Sign in
+            </button>
           </div>
           
-          <div className="w-full p-3 rounded-md bg-neutral-50 text-neutral-700 text-sm">
-            <p className="text-center font-medium mb-2">Demo Credentials</p>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="p-2 border rounded-md">
-                <p className="font-semibold">Admin:</p>
-                <p>Username: admin</p>
-                <p>Password: admin123</p>
-              </div>
-              <div className="p-2 border rounded-md">
-                <p className="font-semibold">Dentist:</p>
-                <p>Username: dentist</p>
-                <p>Password: dentist123</p>
-              </div>
-            </div>
+          <div className="text-center">
+            <button
+              type="button"
+              onClick={handleDemoLogin}
+              className="font-medium text-blue-600 hover:text-blue-500"
+            >
+              Use demo credentials
+            </button>
           </div>
-        </CardFooter>
-      </Card>
+        </form>
+      </div>
     </div>
   );
-}
+};
+
+export default Login; 
