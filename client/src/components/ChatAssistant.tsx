@@ -78,9 +78,18 @@ export const ChatAssistant: React.FC<ChatAssistantProps> = ({ patientId }) => {
         return MOCK_RESPONSES[Math.floor(Math.random() * MOCK_RESPONSES.length)];
       }
       
-      // Otherwise use the real API
+      // Otherwise use the real API with chat history
       console.log(`Sending chat message to API for patient ${patientId}`);
-      return ai.askQuestion(patientId, message);
+      
+      // Include the last 5 messages for context
+      const contextHistory = messages
+        .slice(-5)
+        .map(msg => ({
+          role: msg.sender,
+          content: msg.content
+        }));
+      
+      return ai.askQuestion(patientId, message, contextHistory);
     },
     onSuccess: (response) => {
       const newMessage: Message = {

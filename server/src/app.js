@@ -11,6 +11,7 @@ const authRouter = require('./routes/auth');
 const patientsRouter = require('./routes/patients');
 const scansRouter = require('./routes/scans');
 const aiRouter = require('./routes/ai');
+const { AI_CONFIG } = require('./services/ai');
 
 const app = express();
 
@@ -48,7 +49,12 @@ app.get('/api/health', (req, res) => {
   res.json({ 
     status: 'ok',
     timestamp: new Date(),
-    apiVersion: '1.0.0'
+    apiVersion: '1.0.0',
+    aiConfig: {
+      forceRealApi: AI_CONFIG.FORCE_REAL_API,
+      allowMockFallback: AI_CONFIG.ALLOW_MOCK_FALLBACK,
+      debugMode: AI_CONFIG.DEBUG_MODE
+    }
   });
 });
 

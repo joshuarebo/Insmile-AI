@@ -158,239 +158,18 @@ const mockTreatmentPlan = {
 // Store active analyses
 const activeAnalyses = new Map();
 
+// Import AI service functions
+const { 
+  analyzeImageWithBedrock, 
+  generateTreatmentPlanWithBedrock, 
+  generateChatResponseWithBedrock,
+  AI_CONFIG
+} = require('../services/ai');
+
 // Helper function to analyze an image using Bedrock
-async function analyzeImageWithBedrock(imagePath, type = 'dental') {
-  if (!bedrockClient) {
-    console.log('Bedrock client not available, using mock data');
-    return mockAnalysisResults;
-  }
-
-  try {
-    console.log(`Analyzing ${type} image with Bedrock Nova Pro...`);
-    const startTime = Date.now();
-    
-    // Read the image file
-    const imageBuffer = fs.readFileSync(imagePath);
-    const base64Image = imageBuffer.toString('base64');
-
-    // Create the prompt for dental analysis
-    const prompt = `Please analyze this ${type} dental image in high detail and provide:
-1. A detailed list of findings, including any abnormalities like cavities, gum disease, or misalignments
-2. For each finding, include a confidence level and severity (normal, mild, severe)
-3. An overall assessment of dental health
-4. Format your response as a structured JSON object with the following keys:
-   - findings: array of objects with "label", "confidence" (0-1 decimal), "severity" (normal, mild, severe)
-   - overall: string description of overall dental health
-   - confidence: number indicating overall confidence (0-1)`;
-
-    // Prepare the request payload for Nova Pro
-    const payload = {
-      inputs: [
-        {
-          type: "text",
-          text: prompt
-        },
-        {
-          type: "image",
-          format: "base64",
-          source: {
-            data: base64Image,
-            media_type: "image/jpeg"
-          }
-        }
-      ],
-      inference_params: {
-        temperature: 0.2,
-        top_p: 0.9,
-        max_tokens: 2000
-      }
-    };
-
-    // Invoke the Bedrock model
-    const command = new InvokeModelCommand({
-      modelId: 'anthropic.claude-3-sonnet-20240229-v1:0',
-      body: JSON.stringify(payload)
-    });
-
-    console.log('Sending request to Bedrock...');
-    const response = await bedrockClient.send(command);
-    console.log('Response received from Bedrock');
-    
-    try {
-      const responseBody = JSON.parse(new TextDecoder().decode(response.body));
-      console.log('Parsing response body...');
-      
-      // Extract JSON from the response
-      const outputText = responseBody.outputs[0].text;
-      const jsonMatch = outputText.match(/```json\n([\s\S]*?)\n```/) || 
-                     outputText.match(/({[\s\S]*})/) ||
-                     outputText.match(/{[\s\S]*?}/);
-      
-      if (jsonMatch) {
-        const jsonString = jsonMatch[1] || jsonMatch[0];
-        console.log('Found JSON in response:', jsonString.substring(0, 100) + '...');
-        
-        try {
-          const analysisData = JSON.parse(jsonString);
-          // Add processing time
-          analysisData.processingTime = Date.now() - startTime;
-          console.log('Successfully parsed analysis data');
-          return analysisData;
-        } catch (jsonError) {
-          console.error('Error parsing JSON from response:', jsonError);
-        }
-      } else {
-        console.log('No JSON found in response, using response text');
-        // Format the response as best we can
-        return {
-          overall: outputText.substring(0, 200),
-          findings: [
-            {
-              label: 'AI analysis results (unstructured)',
-              confidence: 0.7,
-              severity: 'mild'
-            }
-          ],
-          confidence: 0.7,
-          processingTime: Date.now() - startTime
-        };
-      }
-    } catch (parseError) {
-      console.error('Error parsing response:', parseError);
-    }
-    
-    // If all else fails, fall back to mock data
-    console.log('Falling back to mock data due to processing error');
-    return mockAnalysisResults;
-  } catch (error) {
-    console.error('Error analyzing image with Bedrock:', error);
-    // Fall back to mock data on error
-    return mockAnalysisResults;
-  }
-}
-
-// Helper function to generate treatment plan using Bedrock
-async function generateTreatmentPlanWithBedrock(findings, patientInfo) {
-  if (!bedrockClient) {
-    console.log('Bedrock client not available, using mock data');
-    return mockTreatmentPlan;
-  }
-
-  try {
-    console.log('Generating treatment plan with Bedrock Nova Pro...');
-    
-    // Create the prompt for treatment plan generation
-    const findingsText = findings
-      .map(f => `- ${f.label} (${f.severity} severity, ${Math.round(f.confidence * 100)}% confidence)`)
-      .join('\n');
-
-    const prompt = `As a dental professional, generate a comprehensive treatment plan based on the following findings and patient information:
-
-Findings:
-${findingsText}
-
-Patient Information:
-${JSON.stringify(patientInfo, null, 2)}
-
-Generate a detailed treatment plan including:
-1. Summary of diagnosis
-2. Step-by-step treatment procedures with priority levels (high, medium, low)
-3. Estimated time and cost for each procedure
-4. Prerequisites for each step
-5. Overall precautions
-6. Alternative treatment options
-
-Format your response as a structured JSON object with the following keys:
-- summary: string
-- diagnosis: string
-- steps: array of objects with description, priority, estimatedTime, estimatedCost, prerequisites
-- totalEstimatedTime: string
-- totalEstimatedCost: string 
-- precautions: array of strings
-- alternatives: array of strings`;
-
-    // Prepare the request payload for Nova Pro
-    const payload = {
-      inputs: [
-        {
-          type: "text",
-          text: prompt
-        }
-      ],
-      inference_params: {
-        temperature: 0.2,
-        top_p: 0.9,
-        max_tokens: 4000
-      }
-    };
-
-    // Invoke the Bedrock model
-    const command = new InvokeModelCommand({
-      modelId: 'anthropic.claude-3-sonnet-20240229-v1:0',
-      body: JSON.stringify(payload)
-    });
-
-    console.log('Sending request to Bedrock...');
-    const response = await bedrockClient.send(command);
-    console.log('Response received from Bedrock');
-    
-    try {
-      const responseBody = JSON.parse(new TextDecoder().decode(response.body));
-      console.log('Parsing response body...');
-      
-      // Extract JSON from the response
-      const outputText = responseBody.outputs[0].text;
-      const jsonMatch = outputText.match(/```json\n([\s\S]*?)\n```/) || 
-                     outputText.match(/({[\s\S]*})/) ||
-                     outputText.match(/{[\s\S]*?}/);
-      
-      if (jsonMatch) {
-        const jsonString = jsonMatch[1] || jsonMatch[0];
-        console.log('Found JSON in response:', jsonString.substring(0, 100) + '...');
-        
-        try {
-          const treatmentPlan = JSON.parse(jsonString);
-          console.log('Successfully parsed treatment plan data');
-          return treatmentPlan;
-        } catch (jsonError) {
-          console.error('Error parsing JSON from response:', jsonError);
-        }
-      }
-    } catch (parseError) {
-      console.error('Error parsing response:', parseError);
-    }
-    
-    // If all else fails, fall back to mock data
-    console.log('Falling back to mock data due to processing error');
-    return mockTreatmentPlan;
-  } catch (error) {
-    console.error('Error generating treatment plan with Bedrock:', error);
-    // Fall back to mock data on error
-    return mockTreatmentPlan;
-  }
-}
-
-/* Test endpoint to check if Bedrock is available */
-router.get('/test', async (req, res) => {
-  try {
-    // Check if Bedrock client is initialized
-    const bedrockAvailable = !!bedrockClient;
-    
-    res.json({
-      message: 'AI service status',
-      bedrockAvailable: bedrockAvailable,
-      timestamp: new Date(),
-      modelInfo: bedrockClient ? 'Connected to AWS Bedrock' : 'AWS Bedrock not available'
-    });
-  } catch (error) {
-    console.error('Error testing AI availability:', error);
-    res.status(500).json({
-      message: 'Error testing AI service',
-      error: error.message,
-      bedrockAvailable: false
-    });
-  }
-});
+// async function analyzeImageWithBedrock(imagePath, type = 'dental') {
+//   ...
+// }
 
 // Upload and analyze scan
 router.post('/upload-scan', upload.single('scan'), async (req, res) => {
@@ -417,8 +196,17 @@ router.post('/upload-scan', upload.single('scan'), async (req, res) => {
       // Update progress
       activeAnalyses.get(scanId).progress = 30;
       
-      // Perform analysis
+      // Add a unique identifier to force fresh analysis
+      if (req.body.forceRealMode === 'true' || AI_CONFIG.FORCE_REAL_API) {
+        console.log('FORCE_REAL_API is enabled - ensuring real analysis is performed');
+      }
+      
+      // Perform analysis using Bedrock function
       const result = await analyzeImageWithBedrock(req.file.path, scanType);
+      
+      if (AI_CONFIG.DEBUG_MODE) {
+        console.log('Analysis result:', JSON.stringify(result, null, 2).substring(0, 500) + '...');
+      }
       
       // Update status
       activeAnalyses.set(scanId, {
@@ -440,7 +228,8 @@ router.post('/upload-scan', upload.single('scan'), async (req, res) => {
   res.json({ 
     success: true, 
     message: 'Scan uploaded and analysis started', 
-    scanId 
+    scanId,
+    usingRealApi: AI_CONFIG.FORCE_REAL_API
   });
 });
 
@@ -577,6 +366,11 @@ router.post('/treatment-plan', async (req, res) => {
     medicalHistory: 'No significant dental history'
   };
   
+  // Log if we're forcing real API calls
+  if (AI_CONFIG.FORCE_REAL_API) {
+    console.log('FORCE_REAL_API is enabled for treatment plan generation');
+  }
+  
   // Check if we have analysis results for this scan
   if (activeAnalyses.has(scanId) && 
       activeAnalyses.get(scanId).status === 'completed' && 
@@ -589,23 +383,97 @@ router.post('/treatment-plan', async (req, res) => {
         analysis.result.findings, 
         patientInfo
       );
-      return res.json(treatmentPlan);
+      
+      if (AI_CONFIG.DEBUG_MODE) {
+        console.log('Treatment plan result:', JSON.stringify(treatmentPlan, null, 2).substring(0, 500) + '...');
+      }
+      
+      return res.json({
+        ...treatmentPlan,
+        _source: 'real_api'
+      });
     } catch (error) {
       console.error('Error generating treatment plan:', error);
+      
+      // If fallbacks are disabled, send the error to the client
+      if (!AI_CONFIG.ALLOW_MOCK_FALLBACK) {
+        return res.status(500).json({ 
+          error: 'Failed to generate treatment plan', 
+          message: error.message,
+          _source: 'error'
+        });
+      }
     }
   }
   
-  // Fallback to mock data
-  res.json(mockTreatmentPlan);
+  // Fallback to mock data only if allowed
+  if (AI_CONFIG.ALLOW_MOCK_FALLBACK) {
+    console.log('Falling back to mock treatment plan data');
+    return res.json({
+      ...mockTreatmentPlan,
+      _source: 'mock'
+    });
+  } else {
+    return res.status(404).json({ 
+      error: 'No analysis found for this scan and mock fallbacks disabled',
+      _source: 'error'
+    });
+  }
 });
 
-// Chat endpoint with Nova Pro
+// Chat endpoint with Bedrock
 router.post('/chat', async (req, res) => {
-  const { patientId, message } = req.body;
+  const { patientId, message, chatHistory } = req.body;
   
-  if (!bedrockClient || !message) {
-    // Fallback to mock responses
-    const responses = [
+  if (!message) {
+    return res.status(400).json({ 
+      error: 'No message provided',
+      _source: 'error'
+    });
+  }
+  
+  // Log if we're forcing real API calls
+  if (AI_CONFIG.FORCE_REAL_API) {
+    console.log('FORCE_REAL_API is enabled for chat responses');
+  }
+  
+  try {
+    const response = await generateChatResponseWithBedrock(message, patientId, chatHistory);
+    
+    if (AI_CONFIG.DEBUG_MODE && typeof response === 'string') {
+      console.log('Chat response:', response.substring(0, 100) + '...');
+    }
+    
+    if (typeof response === 'string') {
+      return res.json({ 
+        message: response,
+        _source: 'real_api'
+      });
+    } else if (response.response) {
+      return res.json({ 
+        message: response.response,
+        _source: 'real_api' 
+      });
+    } else {
+      return res.json({ 
+        message: response,
+        _source: 'real_api' 
+      });
+    }
+  } catch (error) {
+    console.error('Error processing chat message:', error);
+    
+    // If fallbacks are disabled, send the error to the client
+    if (!AI_CONFIG.ALLOW_MOCK_FALLBACK) {
+      return res.status(500).json({ 
+        error: 'Failed to generate chat response', 
+        message: error.message,
+        _source: 'error'
+      });
+    }
+    
+    // Fallback to predefined response
+    const mockResponses = [
       'Based on your dental scan, I recommend scheduling a cleaning appointment.',
       'Your cavity on tooth #14 should be treated within the next 2-3 weeks.',
       'Gum disease is at an early stage and can be managed with proper oral hygiene.',
@@ -614,55 +482,8 @@ router.post('/chat', async (req, res) => {
     ];
     
     return res.json({ 
-      message: responses[Math.floor(Math.random() * responses.length)]
-    });
-  }
-  
-  try {
-    console.log('Processing chat message with Bedrock Nova Pro...');
-    
-    // Create the prompt
-    const prompt = `You are a dental AI assistant named InsmileAI. You're helping a patient with ID ${patientId} understand their dental condition and treatment options.
-
-Please respond to their question in a helpful, accurate and professional manner. Keep your response concise but informative.
-
-Patient question: "${message}"`;
-
-    // Prepare the request payload for Nova Pro
-    const payload = {
-      inputs: [
-        {
-          type: "text",
-          text: prompt
-        }
-      ],
-      inference_params: {
-        temperature: 0.4,
-        top_p: 0.9,
-        max_tokens: 1000
-      }
-    };
-
-    // Invoke the Bedrock model
-    const command = new InvokeModelCommand({
-      modelId: 'anthropic.claude-3-sonnet-20240229-v1:0',
-      body: JSON.stringify(payload)
-    });
-
-    console.log('Sending request to Bedrock...');
-    const response = await bedrockClient.send(command);
-    console.log('Response received from Bedrock');
-    
-    const responseBody = JSON.parse(new TextDecoder().decode(response.body));
-    const aiResponse = responseBody.outputs[0].text;
-    
-    res.json({ message: aiResponse });
-  } catch (error) {
-    console.error('Error processing chat message:', error);
-    
-    // Fallback to predefined response
-    res.json({ 
-      message: "I'm sorry, I'm having trouble processing your request right now. Please try again later."
+      message: mockResponses[Math.floor(Math.random() * mockResponses.length)],
+      _source: 'mock'
     });
   }
 });
@@ -887,6 +708,96 @@ router.get('/scan/:scanId', (req, res) => {
   
   // If all else fails, return a redirect to a demo dental scan
   res.redirect('https://www.shutterstock.com/image-illustration/dental-xray-scan-teeth-3d-260nw-1925303613.jpg');
+});
+
+/* Test endpoint to check if Bedrock is available */
+router.get('/test', async (req, res) => {
+  try {
+    // Check if Bedrock client is initialized
+    const bedrockAvailable = !!bedrockClient;
+    
+    res.json({
+      message: 'AI service status',
+      bedrockAvailable: bedrockAvailable,
+      timestamp: new Date(),
+      modelInfo: bedrockClient ? 'Connected to AWS Bedrock' : 'AWS Bedrock not available'
+    });
+  } catch (error) {
+    console.error('Error testing AI availability:', error);
+    res.status(500).json({
+      message: 'Error testing AI service',
+      error: error.message,
+      bedrockAvailable: false
+    });
+  }
+});
+
+/* Test endpoint to check if Bedrock is available with detailed test */
+router.get('/debug-test', async (req, res) => {
+  try {
+    // Check if bedrock client is initialized
+    if (!bedrockClient) {
+      return res.json({
+        bedrockInitialized: false,
+        testPassed: false,
+        error: 'Bedrock client not initialized'
+      });
+    }
+    
+    console.log('Testing Bedrock connection with Amazon Nova Pro...');
+    
+    // Use Nova Pro format - NOT Claude messages format
+    const payload = {
+      modelId: 'amazon.nova-pro-v1:0',
+      contentType: 'application/json',
+      accept: 'application/json',
+      body: JSON.stringify({
+        inputs: [
+          {
+            type: "text",
+            text: "Respond with 'API_TEST_SUCCESS' if you can read this message. This is a connectivity test for a dental AI application."
+          }
+        ],
+        inference_params: {
+          temperature: 0.1,
+          top_p: 0.9,
+          max_tokens: 20
+        }
+      })
+    };
+    
+    console.log('Sending test payload to Bedrock:', JSON.stringify(payload).substring(0, 200));
+    
+    const command = new InvokeModelCommand(payload);
+    const response = await bedrockClient.send(command);
+    
+    // Parse the response
+    const responseBody = Buffer.from(response.body).toString('utf8');
+    const parsedResponse = JSON.parse(responseBody);
+    
+    console.log('Bedrock test response:', JSON.stringify(parsedResponse).substring(0, 200));
+    
+    // Check for expected response in Nova Pro format
+    const outputText = parsedResponse.outputs?.[0]?.text || '';
+    const testPassed = outputText.includes('API_TEST_SUCCESS') || 
+                      outputText.includes('connectivity test') ||
+                      outputText.toLowerCase().includes('dental');
+    
+    return res.json({
+      bedrockInitialized: true,
+      testPassed,
+      response: parsedResponse,
+      outputText
+    });
+  } catch (error) {
+    console.error('Error testing Bedrock:', error);
+    return res.json({
+      bedrockInitialized: !!bedrockClient,
+      testPassed: false,
+      error: error.message,
+      details: error.toString()
+    });
+  }
 });
 
 module.exports = router; 

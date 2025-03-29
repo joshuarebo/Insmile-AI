@@ -42,12 +42,30 @@ axios.interceptors.request.use(
 
 // Check if API is available
 let isApiAvailable = false; // Start with false until confirmed
+let serverAiConfig = {
+  forceRealApi: false,
+  allowMockFallback: true,
+  debugMode: false
+};
 
 const checkApiAvailability = async (): Promise<boolean> => {
   try {
     console.log('Checking API availability...');
     const response = await axios.get('http://localhost:3001/api/health', { timeout: 5000 });
     console.log('API health check response:', response.data);
+    
+    // Update server AI config if available
+    if (response.data && response.data.aiConfig) {
+      serverAiConfig = response.data.aiConfig;
+      console.log('Server AI config:', serverAiConfig);
+      
+      // If server forces real API, adjust our settings
+      if (serverAiConfig.forceRealApi) {
+        ai.forceRealMode = true;
+        console.log('Server has forceRealApi enabled, setting forceRealMode=true');
+      }
+    }
+    
     isApiAvailable = true;
     console.log('API is available');
     return true;
@@ -112,6 +130,12 @@ export const ai = {
   // For components to check if API is available (synchronous version)
   isAvailable: () => isApiAvailable,
   
+  // Force real API mode - set to true to disable demo mode fallbacks
+  forceRealMode: true,
+  
+  // Get server AI config
+  getServerConfig: () => serverAiConfig,
+  
   // Check if real-time analysis is available
   isRealTimeAvailable: async (): Promise<boolean> => {
     if (!isApiAvailable) {
@@ -119,8 +143,33 @@ export const ai = {
     }
     
     try {
-      const response = await axios.get(`${API_BASE_URL}/test`, { timeout: 5000 });
-      return response.data && response.data.bedrockAvailable === true;
+      // First check with simple health endpoint if it has AI config
+      if (serverAiConfig.forceRealApi === true) {
+        // Try debug-test to verify Bedrock specifically
+        try {
+          const response = await axios.get(`${API_BASE_URL}/debug-test`, { timeout: 8000 });
+          console.log('Raw debug-test response:', response.data);
+          
+          // Check if testPassed property is true
+          const bedrockAvailable = response.data && response.data.testPassed === true;
+          console.log(`Bedrock availability check result: ${bedrockAvailable ? 'AVAILABLE' : 'NOT AVAILABLE'}`);
+          
+          if (!bedrockAvailable && response.data?.error) {
+            console.warn('Bedrock test failed:', response.data.error);
+          }
+          
+          return bedrockAvailable;
+        } catch (testError) {
+          console.error('Error in debug-test:', testError);
+          // If we know the server is forcing real API and it fails, that means we have
+          // a configuration issue with AWS
+          return false;
+        }
+      } else {
+        // Fall back to the older test endpoint
+        const response = await axios.get(`${API_BASE_URL}/test`, { timeout: 5000 });
+        return response.data && response.data.bedrockAvailable === true;
+      }
     } catch (error) {
       console.error('Error checking real-time availability:', error);
       return false;
@@ -129,6 +178,10 @@ export const ai = {
   
   // Helper to check if an ID is in demo format
   isDemoId: (id: string): boolean => {
+    // If forceRealMode is true, don't treat any ID as demo
+    if (ai.forceRealMode) {
+      return false;
+    }
     return id?.startsWith('demo') === true;
   },
 
@@ -264,7 +317,7 @@ export const ai = {
     }
   },
   
-  async askQuestion(patientId: string, question: string) {
+  async askQuestion(patientId: string, question: string, chatHistory?: any[]) {
     // Allow demo IDs to bypass API check
     if (ai.isDemoId(patientId)) {
       console.log('Demo patient ID detected, returning mock response');
@@ -286,11 +339,18 @@ export const ai = {
     }
     
     try {
+      console.log('Sending chat message to real API:', question);
       const response = await axios.post(`${API_BASE_URL}/chat`, {
         patientId,
-        message: question
+        message: question,
+        chatHistory: chatHistory || []
       });
-      return response.data.message;
+      
+      if (response.data && response.data.message) {
+        return response.data.message;
+      } else {
+        throw new Error('Invalid response format');
+      }
     } catch (error) {
       console.error('Error asking question:', error);
       throw error;

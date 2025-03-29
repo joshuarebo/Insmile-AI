@@ -20,6 +20,15 @@ app.use('/api/patients', patientRoutes);
 app.use('/api/scans', scanRoutes);
 app.use('/api/ai', aiRoutes);
 
+// Add health check endpoint
+app.get('/api/health', (req, res) => {
+  res.json({ 
+    status: 'ok', 
+    message: 'Server is running',
+    timestamp: new Date()
+  });
+});
+
 // MongoDB connection
 mongoose.connect('mongodb://localhost:27017/insmile', {
   useNewUrlParser: true,

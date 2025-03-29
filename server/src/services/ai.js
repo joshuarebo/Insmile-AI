@@ -100,9 +100,25 @@ const mockTreatmentPlan = {
   severity: 'medium'
 };
 
+// Configuration for AI behavior
+const AI_CONFIG = {
+  // Set to true to force real API calls even if demo IDs are used
+  FORCE_REAL_API: true,
+  
+  // Set to false to disable fallbacks to mock data (will throw errors instead)
+  ALLOW_MOCK_FALLBACK: false,
+  
+  // Log detailed output for debugging
+  DEBUG_MODE: true
+};
+
 // Helper function to analyze an image using Bedrock
 async function analyzeImageWithBedrock(imagePath, type = 'dental') {
   if (!bedrockClient) {
+    // Fail if we're forced to use real API
+    if (!AI_CONFIG.ALLOW_MOCK_FALLBACK) {
+      throw new Error('Bedrock client not available and mock fallbacks disabled');
+    }
     console.log('Bedrock client not available, using mock data');
     return mockAnalysisResults;
   }
@@ -112,75 +128,106 @@ async function analyzeImageWithBedrock(imagePath, type = 'dental') {
     const startTime = Date.now();
     
     // Read the image file
+    console.log('Reading image file:', imagePath);
     const imageBuffer = fs.readFileSync(imagePath);
+    
+    // Determine file type for MIME type
+    let mediaType = 'image/jpeg';
+    if (imagePath.toLowerCase().endsWith('.png')) {
+      mediaType = 'image/png';
+    } else if (imagePath.toLowerCase().endsWith('.gif')) {
+      mediaType = 'image/gif';
+    } else if (imagePath.toLowerCase().endsWith('.bmp')) {
+      mediaType = 'image/bmp';
+    }
+    
+    console.log('Converting image to base64...');
     const base64Image = imageBuffer.toString('base64');
+    console.log(`Image converted to base64 (${base64Image.length} chars)`);
 
-    // Create the prompt for dental analysis
-    const prompt = `Analyze this dental scan and identify any issues or abnormalities. 
-    Focus on:
-    1. Cavities or decay
-    2. Gum disease or inflammation
-    3. Alignment issues
-    4. Root or nerve problems
-    5. Any other notable findings
-    
-    For each finding, provide:
-    - Detailed description
-    - Severity assessment (normal, mild, severe)
-    - Confidence level (as a percentage)
-    
-    Format your response as a structured JSON object with:
-    - findings: array of objects with "label", "confidence" (0-1), "severity"
-    - overall: string description of overall dental health
-    - confidence: overall confidence (0-1)`;
+    // Create the prompt for dental analysis with specific terminology
+    const prompt = `As a professional dental radiologist with expertise in dental image analysis, I need a detailed assessment of this dental scan. 
 
-    // Prepare the request payload for Bedrock
+Please provide a comprehensive analysis focusing on:
+
+1. Dental caries/cavities: Look for radiolucent areas in the enamel and dentin
+2. Periodontal disease: Assess alveolar bone loss, widening of periodontal ligament space
+3. Endodontic issues: Signs of periapical lesions, root canal problems, or pulp chamber anomalies
+4. Impacted teeth: Particularly wisdom teeth (third molars) that may be partially erupted or impacted
+5. Structural abnormalities: Tooth fractures, anomalies in tooth structure
+6. Bone pathology: Any radiolucent or radiopaque lesions in the jaw bones
+7. Restorations: Identify existing fillings, crowns, implants and assess their condition
+
+For each finding, provide:
+- Precise dental terminology and tooth number (using Universal Numbering System, 1-32)
+- Clinical severity assessment (mild, moderate, severe)
+- Confidence level as a percentage
+- Location information if applicable
+
+Format your response as a structured JSON object with:
+{
+  "findings": [
+    {
+      "label": "Precise diagnosis with tooth number",
+      "confidence": 0.95, // number between 0-1
+      "severity": "mild", // one of: mild, moderate, severe
+      "details": "Additional clinical details if applicable"
+    }
+  ],
+  "overall": "Comprehensive assessment of overall dental health",
+  "confidence": 0.9, // overall confidence level between 0-1
+  "recommendations": ["Prioritized clinical recommendations"]
+}
+
+This analysis will be used for clinical assessment and treatment planning, so precision is critical.`;
+
+    // Prepare the request payload for Nova Pro
+    console.log('Preparing request for Bedrock...');
     const payload = {
-      anthropic_version: 'bedrock-2023-05-31',
-      max_tokens: 2000,
-      messages: [
+      inputs: [
         {
-          role: 'user',
-          content: [
-            {
-              type: 'text',
-              text: prompt
-            },
-            {
-              type: 'image',
-              source: {
-                type: 'base64',
-                media_type: 'image/jpeg',
-                data: base64Image
-              }
-            }
-          ]
+          type: "text",
+          text: prompt
+        },
+        {
+          type: "image",
+          format: "base64",
+          source: {
+            data: base64Image,
+            media_type: mediaType
+          }
         }
       ],
-      temperature: 0.2,
-      top_p: 0.9
+      inference_params: {
+        temperature: 0.1, // Lower temperature for more precise responses
+        top_p: 0.9,
+        max_tokens: 3000 // Allow more thorough responses
+      }
     };
 
-    // Invoke the Bedrock model
+    // Create the command
     const command = new InvokeModelCommand({
-      modelId: 'anthropic.claude-3-sonnet-20240229-v1:0',
+      modelId: 'amazon.nova-pro-v1:0',
       body: JSON.stringify(payload)
     });
 
+    // Invoke the Bedrock model
     console.log('Sending request to Bedrock...');
     const response = await bedrockClient.send(command);
     console.log('Response received from Bedrock');
     
     try {
+      console.log('Decoding response...');
       const responseBody = JSON.parse(new TextDecoder().decode(response.body));
-      console.log('Parsing response body...');
       
-      // Extract the text response
-      const outputText = responseBody.content && responseBody.content[0].text;
+      // Extract the text response from Nova Pro
+      const outputText = responseBody.outputs?.[0]?.text;
       
       if (!outputText) {
         throw new Error('No text content in response');
       }
+      
+      console.log('Raw AI response:', outputText.substring(0, 300) + '...');
       
       // Extract JSON from the response
       const jsonMatch = outputText.match(/```json\n([\s\S]*?)\n```/) || 
@@ -192,28 +239,82 @@ async function analyzeImageWithBedrock(imagePath, type = 'dental') {
         console.log('Found JSON in response:', jsonString.substring(0, 100) + '...');
         
         try {
-          const analysisData = JSON.parse(jsonString);
+          // Clean up any formatting issues before parsing
+          const cleanedJson = jsonString
+            .replace(/(\r\n|\n|\r)/gm, ' ')  // Remove newlines
+            .replace(/\s+/g, ' ')            // Normalize whitespace
+            .replace(/,\s*}/g, '}')          // Remove trailing commas in objects
+            .replace(/,\s*]/g, ']')          // Remove trailing commas in arrays
+            .replace(/\/\/.*/g, '');         // Remove comments
+          
+          const analysisData = JSON.parse(cleanedJson);
           // Add processing time
           analysisData.processingTime = Date.now() - startTime;
           console.log('Successfully parsed analysis data');
+          
+          // Add recommendations if not present
+          if (!analysisData.recommendations) {
+            analysisData.recommendations = [];
+            
+            // Generate recommendations based on findings
+            if (analysisData.findings) {
+              const severeCases = analysisData.findings.filter(f => f.severity === 'severe');
+              const moderateCases = analysisData.findings.filter(f => f.severity === 'moderate');
+              
+              if (severeCases.length > 0) {
+                analysisData.recommendations.push("Urgent dental consultation recommended");
+              }
+              
+              if (moderateCases.length > 0) {
+                analysisData.recommendations.push("Follow-up with dentist within next 2-4 weeks");
+              }
+              
+              // Add general recommendation if none added so far
+              if (analysisData.recommendations.length === 0) {
+                analysisData.recommendations.push("Regular dental check-up advised");
+              }
+            }
+          }
+          
           return analysisData;
         } catch (jsonError) {
           console.error('Error parsing JSON from response:', jsonError);
+          console.log('Problematic JSON string:', jsonString);
         }
       } else {
         console.log('No JSON found in response, formatting response text');
         // Format the response as best we can
+        const findingSections = outputText.split(/\d+\.\s+/).filter(s => s.trim().length > 0);
+        const findings = findingSections.map(section => {
+          // Try to extract severity from the text
+          let severity = 'mild';
+          if (section.toLowerCase().includes('severe') || section.toLowerCase().includes('urgent')) {
+            severity = 'severe';
+          } else if (section.toLowerCase().includes('moderate')) {
+            severity = 'moderate';
+          }
+          
+          return {
+            label: section.substring(0, 200),
+            confidence: 0.7,
+            severity: severity,
+            details: section.substring(0, 300)
+          };
+        });
+        
         return {
-          overall: outputText.substring(0, 200),
-          findings: [
+          findings: findings.length > 0 ? findings : [
             {
-              label: 'AI analysis results (unstructured)',
+              label: outputText.substring(0, 200),
               confidence: 0.7,
-              severity: 'mild'
+              severity: 'mild',
+              details: outputText.substring(0, 300)
             }
           ],
+          overall: outputText.substring(0, 150),
           confidence: 0.7,
-          processingTime: Date.now() - startTime
+          processingTime: Date.now() - startTime,
+          recommendations: ["Consult with your dentist about these findings"]
         };
       }
     } catch (parseError) {
@@ -225,6 +326,12 @@ async function analyzeImageWithBedrock(imagePath, type = 'dental') {
     return mockAnalysisResults;
   } catch (error) {
     console.error('Error analyzing image with Bedrock:', error);
+    
+    // Fail if we're forced to use real API
+    if (!AI_CONFIG.ALLOW_MOCK_FALLBACK) {
+      throw error;
+    }
+    
     // Fall back to mock data on error
     return mockAnalysisResults;
   }
@@ -233,6 +340,10 @@ async function analyzeImageWithBedrock(imagePath, type = 'dental') {
 // Helper function to generate treatment plan using Bedrock
 async function generateTreatmentPlanWithBedrock(findings, patientInfo) {
   if (!bedrockClient) {
+    // Fail if we're forced to use real API
+    if (!AI_CONFIG.ALLOW_MOCK_FALLBACK) {
+      throw new Error('Bedrock client not available and mock fallbacks disabled');
+    }
     console.log('Bedrock client not available, using mock data');
     return mockTreatmentPlan;
   }
@@ -240,72 +351,103 @@ async function generateTreatmentPlanWithBedrock(findings, patientInfo) {
   try {
     console.log('Generating treatment plan with Bedrock...');
     
-    // Create the prompt for treatment plan generation
+    // Create the prompt for treatment plan generation with specific terminology
     const findingsText = findings
       .map(f => `- ${f.label} (${f.severity} severity, ${Math.round(f.confidence * 100)}% confidence)`)
       .join('\n');
 
-    const prompt = `As a dental professional, generate a comprehensive treatment plan based on the following findings:
+    const prompt = `As a specialized dental professional, create a comprehensive treatment plan based on the following patient findings and information.
 
-Findings:
+CLINICAL FINDINGS:
 ${findingsText}
 
-Patient Information:
+PATIENT INFORMATION:
 ${JSON.stringify(patientInfo, null, 2)}
 
-Generate a detailed treatment plan including:
-1. Overall summary of the condition
-2. Step-by-step treatment procedures
-3. Estimated timeframe for each step
-4. Precautions
-5. Alternative treatment options
-6. Total estimated duration
-7. Estimated cost range
-8. Overall severity (low, medium, high)
+Please provide a professionally detailed dental treatment plan that includes:
 
-Format your response as a structured JSON object with the following schema:
+1. Comprehensive diagnosis with specific dental terminology
+2. Step-by-step treatment procedures with proper sequencing and priority levels:
+   - Urgent/immediate care needs
+   - Primary restorative procedures
+   - Secondary/follow-up procedures
+   - Preventive measures
+
+3. For each treatment step, provide:
+   - Detailed clinical procedure description using proper dental terminology (e.g., "Composite resin restoration Class II on tooth #14" rather than just "filling")
+   - Clinical time estimates per procedure
+   - Recovery expectations
+   - Specific materials and techniques recommended
+
+4. Include appropriate precautions, post-procedure care instructions, and potential complications specific to the procedures
+
+5. List specific alternative treatment options with evidence-based comparisons:
+   - E.g., amalgam vs. composite resin vs. ceramic inlay for restorations
+   - Implant vs. bridge vs. partial denture for tooth replacement
+
+6. Provide evidence-based prognosis:
+   - Short-term expectations
+   - Long-term success rates for recommended procedures
+   
+7. Realistic cost estimate ranges, broken down by procedure
+
+Format your response as a valid JSON object with:
 {
-  "patientId": "string",
-  "overview": "string",
+  "patientId": "${patientInfo.id || 'unknown'}",
+  "diagnosisAndOverview": "Detailed diagnosis overview with proper dental terminology",
+  "overallSeverity": "low|moderate|severe",
   "steps": [
     {
-      "step": "string",
-      "description": "string",
-      "timeframe": "string"
+      "procedure": "Specific procedure name with tooth number",
+      "description": "Detailed clinical description of the procedure",
+      "priority": "urgent|high|medium|low",
+      "timeframe": "When this should be done",
+      "estimatedClinicalTime": "Procedure duration estimate",
+      "estimatedCost": "Cost range for this specific procedure",
+      "materials": ["Specific materials to be used"],
+      "postCare": ["Specific aftercare instructions"]
     }
   ],
-  "precautions": ["string"],
-  "alternatives": ["string"],
-  "estimatedDuration": "string",
-  "estimatedCost": "string",
-  "severity": "low|medium|high"
-}`;
+  "precautions": ["List of specific precautions"],
+  "alternatives": [
+    {
+      "procedure": "Alternative procedure name",
+      "description": "Description of alternative",
+      "pros": ["Benefits"],
+      "cons": ["Drawbacks"],
+      "costComparison": "Cost difference"
+    }
+  ],
+  "totalEstimatedDuration": "Total treatment timespan",
+  "totalEstimatedCost": "Total cost range",
+  "maintenanceRecommendations": ["Long-term maintenance recommendations"],
+  "followUpSchedule": "Recommended follow-up timeline"
+}
 
-    // Prepare the request payload for Bedrock
+Ensure each procedure references specific teeth using standard dental numbering systems and uses precise dental terminology.`;
+
+    // Prepare the request payload for Nova Pro
     const payload = {
-      anthropic_version: 'bedrock-2023-05-31',
-      max_tokens: 2000,
-      messages: [
+      inputs: [
         {
-          role: 'user',
-          content: [
-            {
-              type: 'text',
-              text: prompt
-            }
-          ]
+          type: "text",
+          text: prompt
         }
       ],
-      temperature: 0.2,
-      top_p: 0.9
+      inference_params: {
+        temperature: 0.1, // Lower temperature for more consistent and precise responses
+        top_p: 0.9,
+        max_tokens: 5000 // Allow for very detailed treatment plans
+      }
     };
 
-    // Invoke the Bedrock model
+    // Create the command
     const command = new InvokeModelCommand({
-      modelId: 'anthropic.claude-3-sonnet-20240229-v1:0',
+      modelId: 'amazon.nova-pro-v1:0',
       body: JSON.stringify(payload)
     });
 
+    // Invoke the Bedrock model
     console.log('Sending request to Bedrock...');
     const response = await bedrockClient.send(command);
     console.log('Response received from Bedrock');
@@ -314,32 +456,167 @@ Format your response as a structured JSON object with the following schema:
       const responseBody = JSON.parse(new TextDecoder().decode(response.body));
       console.log('Parsing response body...');
       
-      // Extract the text response
-      const outputText = responseBody.content && responseBody.content[0].text;
+      // Extract the text response from Nova Pro
+      const outputText = responseBody.outputs?.[0]?.text;
       
       if (!outputText) {
         throw new Error('No text content in response');
       }
       
-      // Extract JSON from the response
+      console.log('Raw treatment plan response:', outputText.substring(0, 300) + '...');
+      
+      // Extract JSON from the response using different regex patterns
+      let jsonData;
       const jsonMatch = outputText.match(/```json\n([\s\S]*?)\n```/) || 
+                       outputText.match(/```\n([\s\S]*?)\n```/) ||
                        outputText.match(/({[\s\S]*})/) ||
                        outputText.match(/{[\s\S]*?}/);
       
       if (jsonMatch) {
         const jsonString = jsonMatch[1] || jsonMatch[0];
-        console.log('Found JSON in response:', jsonString.substring(0, 100) + '...');
+        console.log('Found JSON in response:', jsonString.substring(0, 150) + '...');
         
         try {
-          const treatmentPlan = JSON.parse(jsonString);
+          // Clean up any formatting issues before parsing
+          const cleanedJson = jsonString
+            .replace(/(\r\n|\n|\r)/gm, ' ')  // Remove newlines
+            .replace(/\s+/g, ' ')            // Normalize whitespace
+            .replace(/,\s*}/g, '}')          // Remove trailing commas in objects
+            .replace(/,\s*]/g, ']')          // Remove trailing commas in arrays
+            .replace(/\/\/.*/g, '')          // Remove comments
+            .replace(/\\"/g, '"')            // Fix escaped quotes
+            .replace(/"\s*:\s*"/g, '":"')    // Normalize key-value spacing
+            .replace(/"\s*:\s*\[/g, '":[')   // Normalize array spacing
+            .replace(/"\s*:\s*{/g, '":{');   // Normalize object spacing
+          
+          jsonData = JSON.parse(cleanedJson);
           console.log('Successfully parsed treatment plan data');
-          return treatmentPlan;
         } catch (jsonError) {
-          console.error('Error parsing JSON from response:', jsonError);
+          console.error('Error parsing cleaned JSON:', jsonError);
+          // Try a more aggressive approach - extract just the data structure
+          try {
+            const dataOnly = outputText.replace(/.*?({[\s\S]*}).*?/g, '$1');
+            jsonData = JSON.parse(dataOnly);
+            console.log('Successfully parsed treatment plan data with aggressive extraction');
+          } catch (secondError) {
+            console.error('Failed aggressive JSON extraction:', secondError);
+            
+            // One more attempt with even more aggressive cleaning
+            try {
+              const extremeCleaning = jsonString
+                .replace(/[^\x20-\x7E]/g, '') // Remove non-printable characters
+                .replace(/,(\s*[\]}])/g, '$1'); // Remove trailing commas
+              
+              jsonData = JSON.parse(extremeCleaning);
+              console.log('Successfully parsed treatment plan with extreme cleaning');
+            } catch (thirdError) {
+              console.error('Failed extreme JSON extraction:', thirdError);
+              throw new Error('Could not parse treatment plan data');
+            }
+          }
         }
+      } else {
+        console.log('No JSON found in response, using raw text');
+        
+        // Create a structured object from the raw text
+        const sections = outputText.split(/\n\s*\n/).filter(s => s.trim().length > 0);
+        
+        // Extract main diagnosis from the first substantial paragraph
+        const diagnosisSection = sections.find(s => 
+          s.toLowerCase().includes('diagnos') || 
+          s.toLowerCase().includes('assessment') ||
+          s.toLowerCase().includes('overview')
+        ) || sections[0] || 'Treatment plan based on findings';
+        
+        // Look for sections that might contain treatment steps
+        const treatmentSection = sections.find(s => 
+          s.toLowerCase().includes('treatment') || 
+          s.toLowerCase().includes('procedure') ||
+          s.toLowerCase().includes('steps')
+        ) || sections[1] || '';
+        
+        // Extract potential treatment steps
+        const stepMatches = treatmentSection.match(/\d+\.\s+([^\n]+)/g) || [];
+        const steps = stepMatches.map(step => {
+          return {
+            procedure: step.substring(0, 100),
+            description: step,
+            priority: step.toLowerCase().includes('urgent') ? 'urgent' : 
+                     step.toLowerCase().includes('immediate') ? 'high' : 'medium',
+            timeframe: "As recommended by dentist",
+            estimatedClinicalTime: "To be determined",
+            estimatedCost: "Consult with dentist"
+          };
+        });
+        
+        // If no steps were found, create a generic step
+        if (steps.length === 0) {
+          steps.push({
+            procedure: "Dental consultation",
+            description: "Review findings with dental professional",
+            priority: "high",
+            timeframe: "As soon as possible",
+            estimatedClinicalTime: "30-60 minutes",
+            estimatedCost: "Varies by provider"
+          });
+        }
+        
+        jsonData = {
+          patientId: patientInfo.id || 'unknown',
+          diagnosisAndOverview: diagnosisSection,
+          overallSeverity: 
+            outputText.toLowerCase().includes('severe') ? 'severe' :
+            outputText.toLowerCase().includes('moderate') ? 'moderate' : 'low',
+          steps: steps,
+          precautions: ["Follow dentist recommendations"],
+          alternatives: [{
+            procedure: "Alternative treatments",
+            description: "Consult with your dentist for alternatives",
+            pros: ["May offer different benefits"],
+            cons: ["May have different drawbacks"],
+            costComparison: "Varies"
+          }],
+          totalEstimatedDuration: sections.find(s => s.toLowerCase().includes('time') || s.toLowerCase().includes('duration')) || "Varies based on treatment",
+          totalEstimatedCost: sections.find(s => s.toLowerCase().includes('cost')) || "Consult with your dentist",
+          maintenanceRecommendations: ["Regular dental check-ups", "Proper oral hygiene"],
+          followUpSchedule: "As recommended by your dentist"
+        };
       }
+      
+      // Map from new format to the format expected by the client
+      // This ensures backward compatibility
+      const treatmentPlan = {
+        patientId: jsonData.patientId || patientInfo.id || 'unknown',
+        overview: jsonData.diagnosisAndOverview || jsonData.overview || 'Treatment plan based on findings',
+        severity: jsonData.overallSeverity || 'medium',
+        
+        // Convert new step format to old format
+        steps: (jsonData.steps || []).map(step => {
+          return {
+            step: step.procedure || step.step,
+            description: step.description,
+            timeframe: step.timeframe || step.estimatedClinicalTime || 'As recommended'
+          };
+        }),
+        
+        precautions: jsonData.precautions || ['Follow dentist recommendations'],
+        
+        // Convert new alternatives format to old format if needed
+        alternatives: Array.isArray(jsonData.alternatives) 
+          ? jsonData.alternatives.map(alt => alt.description || alt) 
+          : jsonData.alternatives || ['Consult with your dentist for alternatives'],
+        
+        estimatedDuration: jsonData.totalEstimatedDuration || 'Varies based on treatment',
+        estimatedCost: jsonData.totalEstimatedCost || 'Consult with your dentist',
+        
+        // Add additional fields that weren't in the old format
+        followUpSchedule: jsonData.followUpSchedule,
+        maintenanceRecommendations: jsonData.maintenanceRecommendations
+      };
+      
+      return treatmentPlan;
     } catch (parseError) {
-      console.error('Error parsing response:', parseError);
+      console.error('Error parsing treatment plan response:', parseError);
     }
     
     // If all else fails, fall back to mock data
@@ -347,6 +624,12 @@ Format your response as a structured JSON object with the following schema:
     return mockTreatmentPlan;
   } catch (error) {
     console.error('Error generating treatment plan with Bedrock:', error);
+    
+    // Fail if we're forced to use real API
+    if (!AI_CONFIG.ALLOW_MOCK_FALLBACK) {
+      throw error;
+    }
+    
     // Fall back to mock data on error
     return mockTreatmentPlan;
   }
@@ -355,6 +638,10 @@ Format your response as a structured JSON object with the following schema:
 // Handle chat responses using Bedrock
 async function generateChatResponseWithBedrock(message, patientId, chatHistory = []) {
   if (!bedrockClient) {
+    // Fail if we're forced to use real API
+    if (!AI_CONFIG.ALLOW_MOCK_FALLBACK) {
+      throw new Error('Bedrock client not available and mock fallbacks disabled');
+    }
     console.log('Bedrock client not available, using mock data');
     const mockResponses = [
       'Based on your dental scan, I recommend scheduling a cleaning appointment.',
@@ -369,43 +656,72 @@ async function generateChatResponseWithBedrock(message, patientId, chatHistory =
   try {
     console.log('Generating chat response with Bedrock...');
     
+    // Check if we have any findings or treatment plan for this patient
+    // This would normally come from a database - simulating by looking for 
+    // matching patientId in activeAnalyses global map (would be defined in routes/ai.js)
+    let patientContext = '';
+    
+    // Here we would ideally fetch context from a database
+    // For now, add some mock context if it's a demo patient
+    if (patientId && patientId.startsWith('demo')) {
+      patientContext = `
+Patient Dental Context:
+- Patient ID: ${patientId}
+- Recent Findings: Cavity detected on tooth #14 (severe), Early stage gum disease (mild)
+- Recommended Treatment: Deep cleaning, Cavity filling on tooth #14
+- Next Appointment: Follow-up examination in 6 weeks
+`;
+    }
+    
     // Format chat history for the prompt
     const formattedHistory = chatHistory
-      .map(msg => `${msg.role === 'user' ? 'Human' : 'Assistant'}: ${msg.content}`)
+      .map(msg => `${msg.role === 'user' ? 'Patient' : 'Dental Assistant'}: ${msg.content}`)
       .join('\n');
     
-    // Create the prompt
-    const prompt = `You are a dental AI assistant named InsmileAI. You're helping a patient with ID ${patientId} understand their dental condition and treatment options.
+    // Create the prompt for Nova Pro with comprehensive dental assistant knowledge
+    const prompt = `You are an advanced dental assistant AI named InsmileAI with expertise in dentistry. You provide professional, accurate, and personalized responses to patient questions about dental conditions, treatments, and oral health.
+
+${patientContext}
+
+Professional Guidelines:
+1. Use proper dental terminology while ensuring explanations are patient-friendly
+2. When discussing procedures or conditions, include relevant information about:
+   - Common symptoms and causes
+   - Treatment approaches with pros and cons
+   - Typical timeframes and recovery expectations
+   - Preventive measures
+3. Maintain a professional, reassuring tone
+4. If unsure about specifics of this patient's case, acknowledge limitations and suggest consulting their dentist
+5. Provide evidence-based information when discussing treatments or recommendations
 
 ${formattedHistory ? `Previous conversation:\n${formattedHistory}\n\n` : ''}
 
-Please respond to their question in a helpful, accurate and professional manner. Keep your response concise but informative.`;
+Patient question: "${message}"
 
-    // Prepare the request payload for Bedrock
+Provide a helpful, accurate and personalized response based on dental best practices and available patient context.`;
+
+    // Prepare the request payload for Nova Pro
     const payload = {
-      anthropic_version: 'bedrock-2023-05-31',
-      max_tokens: 2000,
-      messages: [
+      inputs: [
         {
-          role: 'user',
-          content: [
-            {
-              type: 'text',
-              text: prompt
-            }
-          ]
+          type: "text",
+          text: prompt
         }
       ],
-      temperature: 0.2,
-      top_p: 0.9
+      inference_params: {
+        temperature: 0.3, // Slightly higher temperature for more natural conversation
+        top_p: 0.9,
+        max_tokens: 2000
+      }
     };
 
-    // Invoke the Bedrock model
+    // Create the command
     const command = new InvokeModelCommand({
-      modelId: 'anthropic.claude-3-sonnet-20240229-v1:0',
+      modelId: 'amazon.nova-pro-v1:0',
       body: JSON.stringify(payload)
     });
 
+    // Invoke the Bedrock model
     console.log('Sending request to Bedrock...');
     const response = await bedrockClient.send(command);
     console.log('Response received from Bedrock');
@@ -414,44 +730,47 @@ Please respond to their question in a helpful, accurate and professional manner.
       const responseBody = JSON.parse(new TextDecoder().decode(response.body));
       console.log('Parsing response body...');
       
-      // Extract the text response
-      const outputText = responseBody.content && responseBody.content[0].text;
+      // Extract the text response from Nova Pro
+      const outputText = responseBody.outputs?.[0]?.text;
       
       if (!outputText) {
         throw new Error('No text content in response');
       }
       
-      // Extract JSON from the response
-      const jsonMatch = outputText.match(/```json\n([\s\S]*?)\n```/) || 
-                       outputText.match(/({[\s\S]*})/) ||
-                       outputText.match(/{[\s\S]*?}/);
+      // Process the response to remove any unwanted prefixes
+      let cleanedResponse = outputText
+        .replace(/^(Dental Assistant|Assistant|InsmileAI):\s+/i, '')
+        .replace(/^I'm InsmileAI,\s+/i, '')
+        .replace(/^As a dental assistant,\s+/i, '')
+        .replace(/^As an AI dental assistant,\s+/i, '');
       
-      if (jsonMatch) {
-        const jsonString = jsonMatch[1] || jsonMatch[0];
-        console.log('Found JSON in response:', jsonString.substring(0, 100) + '...');
-        
-        try {
-          const chatResponse = JSON.parse(jsonString);
-          console.log('Successfully parsed chat response');
-          return chatResponse;
-        } catch (jsonError) {
-          console.error('Error parsing JSON from response:', jsonError);
-        }
-      }
+      console.log('Chat response:', cleanedResponse);
+      return cleanedResponse;
     } catch (parseError) {
       console.error('Error parsing response:', parseError);
     }
     
     // If all else fails, fall back to mock data
     console.log('Falling back to mock data due to processing error');
-    return {
-      response: 'I\'m sorry, but I couldn\'t generate a response. Please try again later or contact a dental professional for assistance.'
-    };
+    return "I'm sorry, but I couldn't generate a response. Please try again later or contact a dental professional for assistance.";
   } catch (error) {
     console.error('Error generating chat response with Bedrock:', error);
+    
+    // Fail if we're forced to use real API
+    if (!AI_CONFIG.ALLOW_MOCK_FALLBACK) {
+      throw error;
+    }
+    
     // Fall back to mock data on error
-    return {
-      response: 'I\'m sorry, but I couldn\'t generate a response. Please try again later or contact a dental professional for assistance.'
-    };
+    return "I'm sorry, but I couldn't generate a response. Please try again later or contact a dental professional for assistance.";
   }
-} 
+}
+
+// Export the AI service functions
+module.exports = {
+  bedrockClient,
+  analyzeImageWithBedrock,
+  generateTreatmentPlanWithBedrock,
+  generateChatResponseWithBedrock,
+  AI_CONFIG
+}; 

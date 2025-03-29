@@ -109,7 +109,14 @@ const AIDashboard: React.FC = () => {
           ? 'Server connection not available. Running in demo mode with mock data.'
           : realTimeAvailable 
             ? 'Connected to Bedrock AI services. Uploads and analysis will be processed in real-time.'
-            : 'Running in demo mode. All features work with simulated data.'
+            : <>
+                Running in demo mode. To enable real-time processing:
+                <ol style={{ margin: '8px 0 0 20px', padding: 0 }}>
+                  <li>Edit <code>server/config/aws.json</code></li>
+                  <li>Add your AWS access key and secret key</li>
+                  <li>Restart the server</li>
+                </ol>
+              </>
         }
       </Alert>
       
