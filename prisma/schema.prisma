@@ -1,0 +1,33 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String
+  name      String
+  role      String   @default("dentist")
+  scans     Scan[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Scan {
+  id          String   @id @default(uuid())
+  dentistId   String
+  dentist     User     @relation(fields: [dentistId], references: [id])
+  type        String   // xray, panoramic, intraoral
+  imageUrl    String
+  findings    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}

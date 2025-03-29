@@ -1,0 +1,44 @@
+Develop a fully functional MVP for Insmile AI, focusing on core features without AI processing. Ensure that clinics can onboard, manage patients, upload treatment files, track treatment progress, and handle subscription-based pricing models. Maintain a clean and user-friendly UI with smooth navigation."
+
+🔹 Core Functionalities to Implement
+1️⃣ User Authentication & Role-Based Access
+Enable clinic registration & login with JWT authentication.
+Implement role-based access control:
+Admin: Manage users, billing, and clinic-wide settings.
+Dentist: Upload treatment files, create treatment plans, and track progress.
+Clinic Staff: View patient records and assist with scheduling.
+2️⃣ Patient & Treatment Plan Management
+Implement secure patient records, stored in PostgreSQL or Firebase.
+Assign each patient a unique identifier (UPI) for tracking.
+Enable manual treatment plan creation (diagnosis, procedures, medications).
+Allow file uploads (JPEG, PNG, PDF, DICOM) for patient scans & treatment notes.
+3️⃣ Subscription-Based Pricing Model
+Implement a tiered subscription model for clinics:
+Plan	Monthly Fee (KES)	Features	Ideal For
+Basic	KES 75,000	Patient management, file uploads	Small clinics (<100 patients/month)
+Pro	KES 150,000	Treatment planning, basic workflow tools	Mid-sized clinics (100-500 patients/month)
+Enterprise	KES 250,000	Full automation, API access	Large hospitals, chains (>500 patients/month)
+Enable subscription upgrades, renewals & billing tracking.
+Integrate M-Pesa, Stripe & PayPal for payments.
+4️⃣ File Upload & Secure Storage
+Drag-and-drop file upload system with preview.
+Storage in Azure Blob Storage for scalability.
+Allow renaming, deleting, and downloading files.
+5️⃣ Modern UI/UX & Dashboard Enhancements
+React.js + Tailwind CSS for a smooth, intuitive experience.
+Sidebar navigation for Dashboard, Patients, Treatments, Billing.
+Dark mode & mobile-friendly design.
+📌 Final Deliverables
+✅ Clinic & patient management system.
+✅ Secure file upload & storage system.
+✅ Subscription-based pricing model with billing.
+✅ Modern UI/UX with smooth navigation.
+✅ Scalable architecture for future AI integration.
+
+📌 Paste This in Replit AI for Development
+**"Build an MVP for Insmile AI that includes user authentication (Admin, Dentist, Staff) with JWT. Enable clinics to register, manage patients, and create treatment plans. Develop a secure file upload system with Azure Blob Storage for scans (JPEG, PNG, PDF, DICOM).
+
+Implement a subscription model with three tiers (Basic, Pro, Enterprise) and integrate M-Pesa, Stripe, and PayPal for payments. Provide an admin dashboard to track billing and subscriptions.
+
+Use React.js + Tailwind CSS for a clean UI with sidebar navigation (Dashboard, Patients, Treatments, Billing). Ensure performance optimization with database caching and JWT-based security. Make the system scalable for future AI features."**
+

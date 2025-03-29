@@ -1,0 +1,78 @@
+Develop an MVP/prototype of Insmile AI, an AI-powered dental treatment planning system designed to assist clinics and independent dentists in diagnostics, treatment planning, and patient management. The MVP should be fully functional, web-based, and allow seamless interaction between clinics, dentists, and AI-driven diagnostic tools. The design should be modern, clean, intuitive, and optimized for efficiency to demonstrate real-world usability to potential clients, investors, and stakeholders.
+
+Core Functionalities for MVP
+1. User Roles & Authentication
+Admin (Clinic Owners & Staff)
+Manage clinic-wide patient records.
+Upload & review AI-generated treatment plans.
+Access billing & usage analytics.
+Dentists
+Upload patient scans (CBCT/X-ray images).
+Receive AI-powered diagnosis & treatment recommendations.
+Track treatment progress.
+Patients (View-Only Portal - Future Expansion)
+View assigned treatment plans & progress updates.
+✅ Authentication System:
+
+Secure login & registration via email & OTP authentication.
+Role-based access control (Admin, Dentist, Patient).
+Session management & logout functionality.
+2. AI-Powered Treatment Planning & Diagnostics
+File Upload System: Allow dentists to upload CBCT scans, X-rays, and radiographs (JPG, PNG, DICOM).
+AI Analysis Pipeline:
+Pass scans through AI for automatic diagnostics (cavities, misalignments, fractures).
+Generate treatment recommendations (e.g., orthodontic plan, implants).
+Provide confidence scores on AI results.
+Token-Based AI Usage (Demo Purpose)
+Display the token usage per scan (e.g., "This scan used 100K tokens").
+Allow users to track remaining tokens.
+✅ Backend Integration:
+
+Use Azure OpenAI API for diagnostic analysis.
+Store scan data in Azure Blob Storage.
+Process scans via server-side Python API (Flask/FastAPI).
+3. Patient Management & Treatment Tracking
+Unique Patient Identifiers (UPI):
+Every patient gets a unique ID for tracking treatments across visits.
+Treatment Timeline & Reports:
+Auto-generate treatment timelines from AI recommendations.
+Exportable PDF reports summarizing diagnostics & next steps.
+✅ Database Structure:
+
+Use PostgreSQL or Firebase for secure data storage.
+Store encrypted patient data for HIPAA compliance.
+4. Dashboard & UI/UX Design
+Modern, intuitive dashboard with key metrics:
+Pending scans, token usage, upcoming appointments.
+AI-Generated Treatment Reports:
+Viewable & downloadable in PDF format.
+Role-Specific UI:
+Admins get access to billing & analytics.
+Dentists get treatment planning tools.
+✅ Tech Stack for UI:
+
+React.js + Tailwind CSS for fast, responsive UI.
+ShadCN UI components for a polished look.
+Framer Motion for smooth animations.
+5. Payment & Subscription Management (Demo)
+Basic pricing tiers: Free trial (5 scans) → Upgrade to Basic/Pro.
+Demo Mode: Auto-generate dummy invoices to simulate payments.
+✅ Stripe API for Future Integration
+
+Set up dummy payment options (not fully functional in MVP).
+Technical Architecture
+Frontend:
+
+React.js (Vite setup for speed).
+Tailwind CSS for UI styling.
+React Query for API data fetching.
+Backend:
+
+Python (FastAPI/Flask).
+PostgreSQL / Firebase for patient records.
+Azure OpenAI API for AI processing.
+Azure Blob Storage for image handling.
+Deployment:
+
+Azure App Service (for hosting).
+Vercel (for frontend deployment, faster testing).

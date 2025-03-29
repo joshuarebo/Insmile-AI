@@ -1,0 +1,81 @@
+### **📌 Replit AI Prompt – Adding API Access & Pay-Per-Use Model to Insmile AI MVP**  
+
+**"Enhance the existing Insmile AI MVP by adding two key functionalities: API Access for enterprise clients and a Pay-Per-Use model for independent dentists. Do not remove any existing functionalities, only add the new features. Ensure the system remains fully functional with user authentication, data security, and seamless payment integration.**  
+
+### **🔹 API Access for Enterprise Clients (Hospitals & SaaS Providers)**  
+✅ **Create secure API endpoints** for AI-powered diagnostics, treatment planning, and batch image processing.  
+✅ **Implement OAuth 2.0 authentication** for API users, issuing API keys securely.  
+✅ **Develop an API Usage Dashboard** where enterprise clients can:  
+   - Track token usage per month.  
+   - View billing details & download invoices.  
+   - Purchase additional tokens when limits are exceeded.  
+✅ **Set API pricing tiers** for different enterprise clients:  
+
+| **Plan**          | **Annual Fee (KES)** | **Token Allowance (Per Year)** | **Additional Token Cost (KES/1M Tokens)** | **Ideal For** |  
+|------------------|-------------------|---------------------------|---------------------------------|-------------|  
+| **Standard API** | **KES 1M**         | 500M tokens                | KES 350                         | Hospitals processing 5,000+ cases/year |  
+| **Premium API**  | **KES 2M**         | 1B tokens                  | KES 300                         | Multi-clinic networks handling 10,000+ cases/year |  
+| **Enterprise API** | **KES 5M**        | 2.5B tokens                | KES 250                         | Nationwide imaging companies & SaaS providers |  
+
+✅ **Ensure API clients have access to:**  
+   - AI-powered **CBCT/X-ray processing**.  
+   - AI-assisted **treatment plan generation**.  
+   - Batch processing for hospitals handling multiple cases at once.  
+
+---
+
+### **🔹 Pay-Per-Use Model for Independent Dentists**  
+✅ **Allow dentists to sign up & log in without a subscription** but with access to AI tools on a per-use basis.  
+✅ **Develop a Prepaid Wallet System** where users must deposit funds before using services.  
+✅ **Create a transaction history page** for users to track usage & payments.  
+✅ **Ensure real-time balance tracking & auto-recharge options**.  
+✅ **Integrate mobile & online payments** via **M-Pesa, Stripe, and PayPal**.  
+✅ **Set per-use pricing for individual users:**  
+
+| **Service**                  | **Token Usage (Per Case)** | **Cost to Insmile (KES)** | **User Price (KES)** | **Profit Margin (%)** |  
+|-----------------------------|-------------------------|-------------------------|---------------------|-----------------|  
+| **CBCT/X-Ray Analysis**     | 100K tokens            | KES 32.5                | KES 1,000           | 96.7%           |  
+| **Treatment Planning**       | 300K tokens            | KES 97.5                | KES 2,000           | 95%             |  
+| **Patient Report Generation**| 150K tokens            | KES 48.75               | KES 750             | 93.5%           |  
+
+---
+
+### **🔹 General Enhancements**  
+✅ **Maintain current SaaS subscription model** (Basic, Pro, Enterprise Plans).  
+✅ **Ensure API & Pay-Per-Use models integrate seamlessly into existing database & billing system**.  
+✅ **Retain all previous core functionalities, including patient tracking & treatment plan assignment**.  
+✅ **Optimize the system for scalability using Azure App Service** & ensure secure **PostgreSQL/Firebase data storage**.  
+✅ **Provide documentation & sample API requests** for enterprise clients.  
+
+---
+
+### **📌 Simplified Replit AI Prompt (Paste This for Development)**  
+
+**"Add the following functionalities to Insmile AI MVP without removing existing features:**  
+
+1️⃣ **API Access for Enterprise Clients:**  
+- Secure API endpoints for AI-powered CBCT/X-ray processing & treatment planning.  
+- OAuth 2.0 authentication & API key issuance.  
+- API usage dashboard with billing, token tracking & purchasing options.  
+- Subscription-based pricing: Standard (KES 1M), Premium (KES 2M), Enterprise (KES 5M).  
+
+2️⃣ **Pay-Per-Use Model for Independent Dentists:**  
+- Allow dentists to register & access AI tools without a subscription.  
+- Develop a prepaid wallet system with real-time balance tracking.  
+- Integrate M-Pesa, Stripe & PayPal for seamless payments.  
+- Set per-use pricing:  
+   - CBCT/X-ray analysis – KES 1,000  
+   - Treatment planning – KES 2,000  
+   - Patient report generation – KES 750  
+
+3️⃣ **Enhancements & Security:**  
+- Retain all current functionalities.  
+- Optimize for **scalability using Azure App Service**.  
+- Secure data storage using **PostgreSQL or Firebase**.  
+- Provide API documentation for clients.  
+
+Ensure all features are implemented efficiently and tested for real-world use."**  
+
+---
+
+This prompt ensures that the AI tool **adds new functionalities without overriding existing ones** and structures the development for **scalability, efficiency, and monetization**. 🚀
