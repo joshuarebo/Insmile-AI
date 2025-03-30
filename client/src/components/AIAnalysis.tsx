@@ -31,6 +31,25 @@ interface AIAnalysisProps {
   scanId?: string;
 }
 
+// Helper function to format confidence values
+const formatConfidence = (confidence: any): string => {
+  if (typeof confidence === 'number') {
+    return `${Math.round(confidence * 100)}%`;
+  } else if (typeof confidence === 'string') {
+    switch (confidence.toLowerCase()) {
+      case 'high':
+        return '90%';
+      case 'medium':
+        return '70%';
+      case 'low':
+        return '50%';
+      default:
+        return confidence;
+    }
+  }
+  return 'Unknown';
+};
+
 const AIAnalysis: React.FC<AIAnalysisProps> = ({ patientId, scanId }) => {
   const [loading, setLoading] = useState(false);
   const [analysis, setAnalysis] = useState<any>(null);
@@ -57,6 +76,13 @@ const AIAnalysis: React.FC<AIAnalysisProps> = ({ patientId, scanId }) => {
 
   // When scanId or patientId changes, fetch the analysis
   useEffect(() => {
+    // Reset state when scan ID changes
+    if (scanId) {
+      setAnalysis(null);
+      setAnalysisRequested(false);
+      setError(null);
+    }
+    
     // Always use demo mode if API is unavailable
     if (!apiAvailable) {
       setDemoMode(true);
@@ -75,10 +101,10 @@ const AIAnalysis: React.FC<AIAnalysisProps> = ({ patientId, scanId }) => {
     
     if (!scanId) return;
 
-    // Automatically use demo mode if:
-    // 1. The scan ID starts with "demo"
-    // 2. The patient ID starts with "demo"
-    if (scanId.startsWith('demo-scan-') || (patientId && patientId.startsWith('demo'))) {
+    // Only use demo mode if scan ID explicitly starts with demo
+    // Don't use demo mode just because patient ID starts with demo
+    if (scanId.startsWith('demo-scan-')) {
+      console.log('Using demo mode for demo scan ID');
       setDemoMode(true);
       setAnalysis(MOCK_ANALYSIS);
       return;
@@ -111,27 +137,38 @@ const AIAnalysis: React.FC<AIAnalysisProps> = ({ patientId, scanId }) => {
         }
         
         // Poll for results
-        let attempts = 0;
-        const maxAttempts = 15; // Increase to allow more time
-        const pollDelay = 3000; // 3 seconds
+        const pollDelay = 2000;
+        let pollTimeout: NodeJS.Timeout | null = null;
         
         const pollForResults = async () => {
           try {
-            console.log(`Polling for analysis results (attempt ${attempts + 1}/${maxAttempts})...`);
+            console.log(`Polling for analysis results...`);
             
             // First check status to see if analysis is complete
             const status = await ai.getAnalysisStatus(scanId);
-            console.log(`Analysis status: ${status.status}, progress: ${status.progress}%`);
+            console.log(`Analysis status: ${status.status}, progress: ${status.progress}%, source: ${status._source || 'unknown'}`);
             
             if (status.status === 'completed') {
               const response = await ai.getAnalysis(scanId);
               
               if (response && (response.findings || response.overall)) {
                 console.log('Analysis results received:', response);
+                // Check if this is mock data or real analysis
+                if (response._source === 'mock') {
+                  console.log('Warning: Received mock analysis data instead of real analysis');
+                } else {
+                  console.log('Received real analysis data with findings:', response.findings?.length || 0);
+                }
                 setAnalysis(response);
                 setLoading(false);
                 return true;
+              } else if (response && response.error) {
+                console.error('Error in analysis result:', response.error);
+                throw new Error(response.error);
               }
+            } else if (status.status === 'failed') {
+              console.error('Analysis failed on server:', status.error || 'Unknown error');
+              throw new Error(status.error || 'Analysis failed on server');
             }
             
             return false;
@@ -146,19 +183,24 @@ const AIAnalysis: React.FC<AIAnalysisProps> = ({ patientId, scanId }) => {
         
         // Set up polling interval
         const pollingInterval = setInterval(async () => {
-          attempts++;
-          
           if (await pollForResults()) {
             clearInterval(pollingInterval);
-          } else if (attempts >= maxAttempts) {
-            clearInterval(pollingInterval);
-            throw new Error('Analysis timed out. Switching to demo mode...');
+            if (pollTimeout) clearTimeout(pollTimeout);
           }
         }, pollDelay);
         
+        // Set up a timeout to stop polling after 2 minutes
+        pollTimeout = setTimeout(() => {
+          clearInterval(pollingInterval);
+          throw new Error('Analysis timed out. Switching to demo mode...');
+        }, 120000); // 2 minutes timeout
+        
         // Cleanup
-        return () => clearInterval(pollingInterval);
-      } catch (err: any) {
+        return () => {
+          clearInterval(pollingInterval);
+          if (pollTimeout) clearTimeout(pollTimeout);
+        };
+      } catch (err) {
         console.error('Error fetching analysis:', err);
         setError('Failed to fetch analysis. Switching to demo mode...');
         
@@ -193,7 +235,7 @@ const AIAnalysis: React.FC<AIAnalysisProps> = ({ patientId, scanId }) => {
             <CircularProgress size={60} thickness={4} sx={{ mb: 2 }} />
             <Typography>Analyzing dental scan with AI...</Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-              This may take up to 30 seconds
+              This real-time analysis may take up to 2 minutes
             </Typography>
           </Box>
         </CardContent>
@@ -229,8 +271,15 @@ const AIAnalysis: React.FC<AIAnalysisProps> = ({ patientId, scanId }) => {
     <Card>
       <CardContent>
         <Typography variant="h6" gutterBottom>
-          AI Dental Analysis {demoMode && "(Demo Mode)"}
+          AI Dental Analysis {demoMode ? "(Demo Mode)" : 
+            (analysis._source === 'mock' ? "(Mock Data)" : "")}
         </Typography>
+        
+        {analysis._source === 'mock' && (
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            Using mock analysis data instead of real-time analysis. This is demo data and not based on the uploaded scan.
+          </Alert>
+        )}
         
         <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 2 }}>
           {scanId && (
@@ -246,7 +295,7 @@ const AIAnalysis: React.FC<AIAnalysisProps> = ({ patientId, scanId }) => {
             </Box>
           )}
           
-          <Box sx={{ flex: scanId ? 1 : 2 }}>
+          <Box sx={{ flex: 1 }}>
             <Paper elevation={2} sx={{ p: 2 }}>
               <Typography variant="h6" gutterBottom>Analysis Results</Typography>
               <Typography variant="body1" paragraph>
@@ -266,7 +315,7 @@ const AIAnalysis: React.FC<AIAnalysisProps> = ({ patientId, scanId }) => {
                     </span>
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
-                    Confidence: {Math.round(finding.confidence * 100)}%
+                    Confidence: {formatConfidence(finding.confidence)}
                   </Typography>
                 </Box>
               ))}

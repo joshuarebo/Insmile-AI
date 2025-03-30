@@ -4,7 +4,7 @@ import axios from 'axios';
 import { Tabs, Tab, Box, Typography, Button, Card, CardContent, CircularProgress, Alert } from '@mui/material';
 import { ScanUploader } from '../components/ScanUploader';
 import AIAnalysis from '../components/AIAnalysis';
-import { ChatAssistant } from '../components/ChatAssistant';
+import ChatAssistant from '../components/ChatAssistant';
 import { TreatmentPlan } from '../components/TreatmentPlan';
 
 interface Patient {

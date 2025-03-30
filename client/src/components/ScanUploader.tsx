@@ -62,88 +62,79 @@ export const ScanUploader: React.FC<ScanUploaderProps> = ({ patientId, onScanUpl
   };
 
   const handleUpload = async () => {
-    if (!file) {
-      setError('Please select a file first');
-      return;
-    }
-
+    if (!file) return;
+    
     setUploading(true);
     setError(null);
     setSuccess(null);
-
+    
     try {
-      // Check if we're in demo mode (patientId starts with "demo") or API is unavailable
-      if (patientId.startsWith('demo') || !apiAvailable) {
-        // Simulate an upload in demo mode
-        console.log('Using demo mode for scan upload');
-        await new Promise(resolve => setTimeout(resolve, 1500)); // Simulate upload time
+      // If API is not available, fallback to demo mode
+      if (!apiAvailable) {
+        console.log('API not available, using demo scan upload');
+        await simulateDemoUpload();
+        return;
+      }
+      
+      console.log(`Uploading scan for patient ${patientId}`);
+      
+      // Create form data
+      const formData = new FormData();
+      formData.append('scan', file);
+      formData.append('patientId', patientId);
+      
+      // Use ai service for real uploads
+      const result = await aiService.uploadScan(file, patientId);
+      console.log('Upload result:', result);
+      
+      if (result && result.scanId) {
+        setSuccess('Scan uploaded successfully');
         
-        const demoScanId = `demo-scan-${Date.now()}`;
-        setSuccess('Demo scan uploaded successfully!');
-        
+        // Notify parent of new scan
         if (onScanUploaded) {
-          onScanUploaded(demoScanId);
+          onScanUploaded(result.scanId);
         }
       } else {
-        // Use the real API for upload
-        console.log('Uploading scan to real API');
-        const formData = new FormData();
-        formData.append('scan', file);
-        formData.append('patientId', patientId);
-        formData.append('scanType', 'dental');
-        
-        const response = await axios.post('http://localhost:3001/api/ai/upload-scan', formData, {
-          headers: {
-            'Content-Type': 'multipart/form-data'
-          }
-        });
-        
-        if (response.data && response.data.success) {
-          setSuccess('Scan uploaded successfully!');
-          
-          if (onScanUploaded && response.data.scanId) {
-            onScanUploaded(response.data.scanId);
-          }
-        } else {
-          throw new Error(response.data.message || 'Upload failed');
-        }
+        throw new Error('Upload failed: No scan ID returned');
       }
     } catch (err: any) {
       console.error('Upload error:', err);
       setError(err.message || 'Failed to upload scan');
       
-      // Fall back to demo mode on API failure
-      if (!patientId.startsWith('demo') && apiAvailable) {
-        setError('API error. Falling back to demo mode...');
-        setTimeout(() => {
-          const demoScanId = `demo-scan-${Date.now()}`;
-          setSuccess('Demo scan loaded as fallback');
-          
-          if (onScanUploaded) {
-            onScanUploaded(demoScanId);
-          }
-        }, 1500);
-      }
+      // If real upload failed, don't automatically fallback to demo mode
+      // Let the user decide whether to use a demo scan
     } finally {
       setUploading(false);
     }
   };
 
-  const handleDemoScan = () => {
+  const handleDemoScan = async () => {
     setUploading(true);
     setError(null);
     setSuccess(null);
     
-    // Simulate loading
-    setTimeout(() => {
+    try {
+      await simulateDemoUpload();
+    } finally {
       setUploading(false);
-      setSuccess('Demo scan loaded!');
-      
-      if (onScanUploaded) {
-        const demoScanId = `demo-scan-${Date.now()}`;
-        onScanUploaded(demoScanId);
-      }
-    }, 1000);
+    }
+  };
+
+  // Simulate a demo upload for testing
+  const simulateDemoUpload = async () => {
+    console.log('Using demo scan for testing');
+    
+    // Simulate network delay
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    // Create a demo scan ID with timestamp to ensure uniqueness
+    const demoScanId = `demo-scan-${Date.now()}`;
+    setSuccess('Demo scan loaded successfully');
+    
+    // Notify parent of new scan
+    if (onScanUploaded) {
+      onScanUploaded(demoScanId);
+    }
   };
 
   return (

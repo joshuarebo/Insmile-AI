@@ -3,7 +3,7 @@ import { Box, Card, CardContent, Typography, Tab, Tabs, Button, Alert, Chip } fr
 import { ScanUploader } from '../components/ScanUploader';
 import AIAnalysis from '../components/AIAnalysis';
 import { TreatmentPlan } from '../components/TreatmentPlan';
-import { ChatAssistant } from '../components/ChatAssistant';
+import ChatAssistant from '../components/ChatAssistant';
 import axios from 'axios';
 import { ai } from '../services/ai';
 

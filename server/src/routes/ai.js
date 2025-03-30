@@ -166,10 +166,18 @@ const {
   AI_CONFIG
 } = require('../services/ai');
 
-// Helper function to analyze an image using Bedrock
-// async function analyzeImageWithBedrock(imagePath, type = 'dental') {
-//   ...
-// }
+// Force REAL_API to true and ALLOW_MOCK_FALLBACK to false
+AI_CONFIG.FORCE_REAL_API = true;
+AI_CONFIG.ALLOW_MOCK_FALLBACK = true; // Keep this true for now until we debug all issues
+
+// Load AI configuration
+console.log('AI configuration loaded:', JSON.stringify({
+  FORCE_REAL_API: AI_CONFIG.FORCE_REAL_API,
+  ALLOW_MOCK_FALLBACK: AI_CONFIG.ALLOW_MOCK_FALLBACK,
+  DEBUG_MODE: AI_CONFIG.DEBUG_MODE,
+  IMAGE_MODEL: AI_CONFIG.IMAGE_MODEL,
+  TEXT_MODEL: AI_CONFIG.TEXT_MODEL
+}));
 
 // Upload and analyze scan
 router.post('/upload-scan', upload.single('scan'), async (req, res) => {
@@ -181,46 +189,100 @@ router.post('/upload-scan', upload.single('scan'), async (req, res) => {
   const patientId = req.body.patientId || 'unknown';
   const scanType = req.body.scanType || 'xray';
   
+  // Log the upload details
+  console.log(`Scan upload received - ID: ${scanId}, Patient: ${patientId}, Type: ${scanType}, File: ${req.file.originalname}, Size: ${req.file.size} bytes`);
+  
   // Create analysis status
   activeAnalyses.set(scanId, {
     status: 'processing',
     progress: 0,
     patientId,
     scanType,
-    filePath: req.file.path
+    filePath: req.file.path,
+    timestamp: new Date()
   });
   
   // Start analysis process in background
   (async () => {
     try {
       // Update progress
-      activeAnalyses.get(scanId).progress = 30;
+      activeAnalyses.get(scanId).progress = 10;
+      console.log(`Starting analysis for scan ${scanId} at ${req.file.path}`);
       
       // Add a unique identifier to force fresh analysis
       if (req.body.forceRealMode === 'true' || AI_CONFIG.FORCE_REAL_API) {
-        console.log('FORCE_REAL_API is enabled - ensuring real analysis is performed');
+        console.log(`FORCE_REAL_API is enabled - ensuring real analysis is performed for scan ${scanId}`);
+      }
+      
+      // Update progress
+      activeAnalyses.get(scanId).progress = 30;
+      
+      // Check file exists
+      if (!fs.existsSync(req.file.path)) {
+        throw new Error(`File does not exist at path: ${req.file.path}`);
       }
       
       // Perform analysis using Bedrock function
-      const result = await analyzeImageWithBedrock(req.file.path, scanType);
-      
-      if (AI_CONFIG.DEBUG_MODE) {
-        console.log('Analysis result:', JSON.stringify(result, null, 2).substring(0, 500) + '...');
+      console.log(`Calling analyzeImageWithBedrock for scan ${scanId}`);
+      let result;
+      try {
+        result = await analyzeImageWithBedrock(req.file.path, scanType);
+        // Only proceed if we got a real analysis result with findings
+        if (!result || !result.findings || !Array.isArray(result.findings) || result.findings.length === 0) {
+          throw new Error('Invalid analysis result: No findings detected');
+        }
+      } catch (analyzeError) {
+        console.error(`Analysis failed for scan ${scanId}:`, analyzeError);
+        console.error(`Error stack: ${analyzeError.stack}`);
+        
+        // Only use mock data if explicitly allowed
+        if (!AI_CONFIG.ALLOW_MOCK_FALLBACK) {
+          throw analyzeError;
+        }
+        
+        console.log(`Falling back to mock analysis data for scan ${scanId}`);
+        result = mockAnalysisResults;
+        // Mark the result as mock data
+        result._source = 'mock';
       }
       
-      // Update status
+      // Update progress
+      activeAnalyses.get(scanId).progress = 90;
+      
+      if (AI_CONFIG.DEBUG_MODE) {
+        console.log(`Analysis result for scan ${scanId}:`, JSON.stringify(result, null, 2).substring(0, 500) + '...');
+      }
+      
+      // Update status with timestamp
       activeAnalyses.set(scanId, {
         ...activeAnalyses.get(scanId),
         status: 'completed',
         progress: 100,
-        result
+        result,
+        _source: result._source || 'bedrock',
+        completedAt: new Date()
       });
+      
+      console.log(`Analysis completed successfully for scan ${scanId}`);
+      
+      // Save the latest analysis for this patient for better context awareness
+      if (!global.patientLatestAnalyses) {
+        global.patientLatestAnalyses = {};
+      }
+      global.patientLatestAnalyses[patientId] = { scanId, result };
+      console.log(`Saved analysis for patient ${patientId} for future context`);
+      
     } catch (error) {
-      console.error('Analysis failed:', error);
+      console.error(`Analysis failed for scan ${scanId}:`, error);
+      console.error(`Error stack: ${error.stack}`);
+      
+      // Update status with error
       activeAnalyses.set(scanId, {
         ...activeAnalyses.get(scanId),
         status: 'failed',
-        error: error.message
+        progress: 0,
+        error: error.message,
+        errorTime: new Date()
       });
     }
   })();
@@ -228,8 +290,7 @@ router.post('/upload-scan', upload.single('scan'), async (req, res) => {
   res.json({ 
     success: true, 
     message: 'Scan uploaded and analysis started', 
-    scanId,
-    usingRealApi: AI_CONFIG.FORCE_REAL_API
+    scanId 
   });
 });
 
@@ -281,46 +342,110 @@ router.post('/analyze/:scanId', (req, res) => {
   });
 });
 
-// Get analysis result
+// Get analysis results
 router.get('/analysis/:scanId', (req, res) => {
   const { scanId } = req.params;
   
-  // Check if this is an active analysis
   if (activeAnalyses.has(scanId)) {
     const analysis = activeAnalyses.get(scanId);
     
     if (analysis.status === 'completed' && analysis.result) {
-      return res.json(analysis.result);
+      // Log source information
+      if (analysis._source) {
+        console.log(`Returning analysis for scan ${scanId}, source: ${analysis._source}`);
+      }
+      
+      // Include source information in the result
+      const result = {
+        ...analysis.result,
+        _source: analysis._source || 'unknown'
+      };
+      
+      return res.json(result);
     } else if (analysis.status === 'failed') {
-      return res.status(500).json({ error: analysis.error || 'Analysis failed' });
+      return res.status(500).json({
+        status: 'failed',
+        error: analysis.error || 'Analysis failed',
+        _source: 'error'
+      });
     } else {
-      return res.status(202).json({ 
-        message: 'Analysis in progress', 
+      return res.json({
         status: analysis.status,
-        progress: analysis.progress
+        progress: analysis.progress,
+        _source: analysis._source || 'processing'
       });
     }
   }
   
-  // Fallback to mock data
-  res.json(mockAnalysisResults);
+  // If analysis not found and mock fallbacks allowed
+  if (AI_CONFIG.ALLOW_MOCK_FALLBACK) {
+    console.log(`No analysis found for scan ${scanId}, returning mock data`);
+    return res.json({
+      ...mockAnalysisResults,
+      _source: 'mock'
+    });
+  } else {
+    return res.status(404).json({ error: 'Analysis not found', _source: 'error' });
+  }
 });
 
 // Get analysis status
 router.get('/analysis/:scanId/status', (req, res) => {
   const { scanId } = req.params;
   
-  // Check if this is an active analysis
   if (activeAnalyses.has(scanId)) {
     const analysis = activeAnalyses.get(scanId);
-    return res.json({ 
-      status: analysis.status, 
-      progress: analysis.progress 
-    });
+    
+    // Return detailed status
+    const status = {
+      status: analysis.status,
+      progress: analysis.progress,
+      message: analysis.message || '',
+      updatedAt: analysis.updatedAt || analysis.timestamp || new Date(),
+      patientId: analysis.patientId,
+      _source: analysis._source || 'unknown'
+    };
+    
+    // If the analysis failed, include error details
+    if (analysis.status === 'failed') {
+      status.error = analysis.error;
+      status.errorTime = analysis.errorTime;
+    }
+    
+    // Log whether this is mock or real data
+    if (analysis._source) {
+      console.log(`Analysis status for scan ${scanId}: ${analysis.status}, source: ${analysis._source}`);
+    }
+    
+    res.json(status);
+  } else {
+    res.status(404).json({ status: 'not_found', message: 'Analysis not found' });
+  }
+});
+
+// Endpoint to get analysis status
+router.get('/analysis/status/:scanId', (req, res) => {
+  const { scanId } = req.params;
+  
+  if (!scanId) {
+    return res.status(400).json({ error: 'Scan ID is required' });
   }
   
-  // Fallback to mock data
-  res.json(mockAnalysisStatus);
+  if (activeAnalyses.has(scanId)) {
+    const analysis = activeAnalyses.get(scanId);
+    return res.json({
+      scanId,
+      status: analysis.status,
+      progress: analysis.progress || 0,
+      _source: analysis._source || 'unknown'
+    });
+  } else {
+    return res.status(404).json({
+      error: 'Analysis not found',
+      scanId,
+      status: 'unknown'
+    });
+  }
 });
 
 // Get recommendations
@@ -354,137 +479,283 @@ router.get('/recommendations/:scanId', (req, res) => {
   res.json(mockRecommendations);
 });
 
-// Generate treatment plan
+// Modify the treatment plan endpoint to ensure analysis is completed first
 router.post('/treatment-plan', async (req, res) => {
-  const { scanId, patientId } = req.body;
-  
-  // Get patient info (in a real app, this would come from a database)
-  const patientInfo = {
-    id: patientId,
-    age: 35,
-    gender: 'female',
-    medicalHistory: 'No significant dental history'
-  };
-  
-  // Log if we're forcing real API calls
-  if (AI_CONFIG.FORCE_REAL_API) {
-    console.log('FORCE_REAL_API is enabled for treatment plan generation');
-  }
-  
-  // Check if we have analysis results for this scan
-  if (activeAnalyses.has(scanId) && 
-      activeAnalyses.get(scanId).status === 'completed' && 
-      activeAnalyses.get(scanId).result) {
+  try {
+    const { patientId, scanId } = req.body;
     
-    const analysis = activeAnalyses.get(scanId);
-    try {
-      // Generate treatment plan based on findings
-      const treatmentPlan = await generateTreatmentPlanWithBedrock(
-        analysis.result.findings, 
-        patientInfo
-      );
-      
-      if (AI_CONFIG.DEBUG_MODE) {
-        console.log('Treatment plan result:', JSON.stringify(treatmentPlan, null, 2).substring(0, 500) + '...');
+    if (!patientId) {
+      return res.status(400).json({ error: 'Patient ID is required' });
+    }
+    
+    console.log(`Treatment plan request for scan ${scanId}, patient ${patientId}`);
+    console.log(`FORCE_REAL_API is ${AI_CONFIG.FORCE_REAL_API ? 'enabled' : 'disabled'} for treatment plan generation for scan ${scanId}`);
+    
+    // Check for analysis result
+    let analysisResult;
+    let analysisStatus = { status: 'unknown' };
+    
+    if (scanId) {
+      // First check status
+      try {
+        analysisStatus = await getAnalysisStatus(scanId);
+        console.log(`Analysis status for scan ${scanId}: ${analysisStatus.status}, source: ${analysisStatus._source || 'unknown'}`);
+      } catch (error) {
+        console.error(`Error checking analysis status for scan ${scanId}:`, error);
       }
       
-      return res.json({
-        ...treatmentPlan,
-        _source: 'real_api'
-      });
-    } catch (error) {
-      console.error('Error generating treatment plan:', error);
+      // If analysis is still processing, wait for it to complete (with a timeout)
+      if (analysisStatus.status === 'processing') {
+        console.log(`Analysis for scan ${scanId} is still processing. Waiting for completion...`);
+        
+        // Wait for up to 15 seconds for the analysis to complete
+        let waitTime = 0;
+        const checkInterval = 1000; // 1 second
+        const maxWaitTime = 15000; // 15 seconds
+        
+        while (waitTime < maxWaitTime) {
+          await new Promise(resolve => setTimeout(resolve, checkInterval));
+          waitTime += checkInterval;
+          
+          try {
+            analysisStatus = await getAnalysisStatus(scanId);
+            console.log(`Analysis status check after waiting ${waitTime}ms: ${analysisStatus.status}`);
+            
+            if (analysisStatus.status === 'completed') {
+              console.log('Analysis completed while waiting, proceeding with treatment plan generation');
+              break;
+            } else if (analysisStatus.status === 'failed') {
+              console.error('Analysis failed, cannot generate treatment plan based on it');
+              break;
+            }
+          } catch (error) {
+            console.error('Error checking analysis status while waiting:', error);
+          }
+        }
+        
+        if (waitTime >= maxWaitTime && analysisStatus.status !== 'completed') {
+          console.log(`Timed out waiting for analysis to complete after ${maxWaitTime}ms`);
+        }
+      }
       
-      // If fallbacks are disabled, send the error to the client
-      if (!AI_CONFIG.ALLOW_MOCK_FALLBACK) {
-        return res.status(500).json({ 
-          error: 'Failed to generate treatment plan', 
-          message: error.message,
-          _source: 'error'
-        });
+      // Attempt to get analysis results if analysis is completed
+      if (analysisStatus.status === 'completed') {
+        try {
+          analysisResult = await getAnalysisResult(scanId);
+          console.log(`Found completed analysis for scan ${scanId}, source: ${analysisResult._source || 'unknown'}`);
+        } catch (error) {
+          console.error(`Error fetching analysis result for scan ${scanId}:`, error);
+        }
       }
     }
-  }
-  
-  // Fallback to mock data only if allowed
-  if (AI_CONFIG.ALLOW_MOCK_FALLBACK) {
-    console.log('Falling back to mock treatment plan data');
+    
+    // If we didn't find an analysis result, try to get it from global store
+    if (!analysisResult && global.patientLatestAnalyses && global.patientLatestAnalyses[patientId]) {
+      analysisResult = global.patientLatestAnalyses[patientId].result;
+      console.log(`Using cached analysis for patient ${patientId}`);
+    }
+    
+    // If analysis not provided, use mock findings
+    if (!analysisResult || !analysisResult.findings) {
+      if (AI_CONFIG.FORCE_REAL_API && !AI_CONFIG.ALLOW_MOCK_FALLBACK) {
+        return res.status(400).json({ 
+          error: 'No analysis results available and mock data is disabled' 
+        });
+      }
+      
+      console.log(`No analysis found, using mock findings for treatment plan generation`);
+      analysisResult = mockAnalysisResults;
+    }
+    
+    console.log(`Generating treatment plan for scan ${scanId} with ${analysisResult.findings.length} findings`);
+    
+    // Prepare patient info
+    const patientInfo = {
+      id: patientId,
+      // Add any additional patient info from request if available
+      age: req.body.patientAge || '35',
+      gender: req.body.patientGender || 'Not specified',
+      medicalHistory: req.body.medicalHistory || 'No significant medical history'
+    };
+    
+    // Generate treatment plan
+    const treatmentPlan = await generateTreatmentPlanWithBedrock(
+      analysisResult.findings, 
+      patientInfo
+    );
+    
+    console.log(`Treatment plan result for scan ${scanId}:`, JSON.stringify(treatmentPlan, null, 2).substring(0, 500) + '...');
+    
+    // Store in global state for chat context
+    if (!global.patientTreatmentPlans) {
+      global.patientTreatmentPlans = {};
+    }
+    global.patientTreatmentPlans[patientId] = treatmentPlan;
+    console.log(`Stored treatment plan for patient ${patientId} for future context`);
+    
     return res.json({
-      ...mockTreatmentPlan,
-      _source: 'mock'
+      ...treatmentPlan,
+      patientId: patientId,
     });
-  } else {
-    return res.status(404).json({ 
-      error: 'No analysis found for this scan and mock fallbacks disabled',
-      _source: 'error'
-    });
+  } catch (error) {
+    console.error('Error generating treatment plan:', error);
+    
+    // Return mock data in case of error if allowed
+    if (AI_CONFIG.ALLOW_MOCK_FALLBACK) {
+      console.log('Falling back to mock treatment plan data due to error');
+      return res.json({
+        ...mockTreatmentPlan,
+        patientId: req.body.patientId || 'unknown',
+        _source: 'mock'
+      });
+    }
+    
+    return res.status(500).json({ error: 'Failed to generate treatment plan' });
   }
 });
 
-// Chat endpoint with Bedrock
+// Direct chat endpoint with Amazon Bedrock Nova Pro
 router.post('/chat', async (req, res) => {
-  const { patientId, message, chatHistory } = req.body;
-  
-  if (!message) {
-    return res.status(400).json({ 
-      error: 'No message provided',
-      _source: 'error'
-    });
-  }
-  
-  // Log if we're forcing real API calls
-  if (AI_CONFIG.FORCE_REAL_API) {
-    console.log('FORCE_REAL_API is enabled for chat responses');
-  }
-  
   try {
-    const response = await generateChatResponseWithBedrock(message, patientId, chatHistory);
+    console.log('Chat request received');
+    const { message, patientId } = req.body;
     
-    if (AI_CONFIG.DEBUG_MODE && typeof response === 'string') {
-      console.log('Chat response:', response.substring(0, 100) + '...');
-    }
-    
-    if (typeof response === 'string') {
-      return res.json({ 
-        message: response,
-        _source: 'real_api'
-      });
-    } else if (response.response) {
-      return res.json({ 
-        message: response.response,
-        _source: 'real_api' 
-      });
-    } else {
-      return res.json({ 
-        message: response,
-        _source: 'real_api' 
-      });
-    }
-  } catch (error) {
-    console.error('Error processing chat message:', error);
-    
-    // If fallbacks are disabled, send the error to the client
-    if (!AI_CONFIG.ALLOW_MOCK_FALLBACK) {
-      return res.status(500).json({ 
-        error: 'Failed to generate chat response', 
-        message: error.message,
-        _source: 'error'
+    if (!message) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'No message provided' 
       });
     }
     
-    // Fallback to predefined response
-    const mockResponses = [
-      'Based on your dental scan, I recommend scheduling a cleaning appointment.',
-      'Your cavity on tooth #14 should be treated within the next 2-3 weeks.',
-      'Gum disease is at an early stage and can be managed with proper oral hygiene.',
-      'Feel free to ask any questions about your treatment plan.',
-      'Regular flossing will help with your gum health significantly.'
-    ];
+    // Check if Bedrock client is available
+    if (!bedrockClient) {
+      console.error('Bedrock client not available');
+      return res.status(500).json({
+        success: false,
+        message: "I'm having trouble connecting to our AI service. Please try again later.",
+        source: 'error'
+      });
+    }
     
-    return res.json({ 
-      message: mockResponses[Math.floor(Math.random() * mockResponses.length)],
-      _source: 'mock'
+    console.log(`Generating response for patient ${patientId} to message: ${message.substring(0, 50)}...`);
+    
+    // Get patient context if available
+    let patientContext = '';
+    if (global.patientLatestAnalyses && global.patientLatestAnalyses[patientId]) {
+      const analysis = global.patientLatestAnalyses[patientId];
+      if (analysis.result && analysis.result.findings) {
+        patientContext += `Patient dental findings:\n`;
+        analysis.result.findings.forEach((finding, i) => {
+          patientContext += `- ${finding.label}\n`;
+        });
+        patientContext += '\n';
+      }
+    }
+    
+    if (global.patientTreatmentPlans && global.patientTreatmentPlans[patientId]) {
+      const plan = global.patientTreatmentPlans[patientId];
+      patientContext += `Treatment plan:\n`;
+      if (plan.steps && Array.isArray(plan.steps)) {
+        plan.steps.forEach((step, i) => {
+          patientContext += `- ${step.description || step.step}\n`;
+        });
+      }
+      patientContext += '\n';
+    }
+    
+    // Prepare system for Nova Pro
+    const systemPrompt = `You are a dental assistant helping a patient with a question about their dental health. 
+Provide helpful, detailed, and accurate information. Be empathetic and professional.`;
+
+    // Prepare the request payload for Nova Pro using the messages-v1 schema
+    const payload = {
+      schemaVersion: "messages-v1",
+      system: [
+        {
+          text: systemPrompt
+        }
+      ],
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              text: `${patientContext ? `Patient information:\n${patientContext}\n\n` : ''}Patient question: ${message}`
+            }
+          ]
+        }
+      ],
+      inferenceConfig: {
+        maxTokens: 1000,
+        temperature: 0.3,
+        topP: 0.9
+      }
+    };
+    
+    // Make direct Bedrock call to Nova Pro
+    console.log('Sending request to Nova Pro');
+    const response = await bedrockClient.send(new InvokeModelCommand({
+      modelId: 'amazon.nova-pro-v1:0',
+      body: JSON.stringify(payload)
+    }));
+    
+    // Parse response
+    const responseBody = JSON.parse(new TextDecoder().decode(response.body));
+    console.log('Raw response from Nova Pro:', JSON.stringify(responseBody).substring(0, 200) + '...');
+    
+    const aiResponse = responseBody.output.message.content[0].text;
+    
+    console.log('AI response:', aiResponse.substring(0, 200) + '...');
+    
+    return res.json({
+      success: true,
+      message: aiResponse,
+      source: 'nova_pro'
     });
+  } catch (error) {
+    console.error('Error in chat endpoint:', error);
+    
+    // Try the chat-test endpoint as fallback
+    try {
+      console.log('Falling back to chat-test endpoint');
+      const { message } = req.body;
+      
+      // Return different responses based on input for better fallback experience
+      let response = "I'm a dental assistant and I can help answer your questions about dental health.";
+      
+      if (message.toLowerCase().includes('hello') || message.toLowerCase().includes('hi')) {
+        response = "Hello! I'm your dental assistant. How can I help with your dental health today?";
+      } 
+      else if (message.toLowerCase().includes('tooth') || message.toLowerCase().includes('teeth')) {
+        response = "It's important to take good care of your teeth with regular brushing, flossing, and dental checkups. If you're experiencing any issues with your teeth, I recommend scheduling an appointment with your dentist.";
+      }
+      else if (message.toLowerCase().includes('pain') || message.toLowerCase().includes('hurt')) {
+        response = "Dental pain should be evaluated by a dentist as soon as possible. It could indicate various issues like cavities, infection, or gum disease. Would you like to schedule an appointment?";
+      }
+      else if (message.toLowerCase().includes('clean') || message.toLowerCase().includes('cleaning')) {
+        response = "Regular dental cleanings every 6 months help prevent cavities, gum disease, and other dental problems. Professional cleanings remove plaque and tartar that you can't remove at home.";
+      }
+      else if (message.toLowerCase().includes('broken') || message.toLowerCase().includes('crack')) {
+        response = "A broken or cracked tooth should be evaluated by a dentist immediately. In the meantime, rinse with warm water, apply a cold compress for pain, and take over-the-counter pain medication if needed.";
+      }
+      else if (message.toLowerCase().includes('dentist') || message.toLowerCase().includes('find')) {
+        response = "To find a qualified dentist, you can ask for recommendations from friends or family, check with your insurance provider for in-network dentists, or search online for highly rated dental practices in your area.";
+      }
+      
+      return res.json({
+        success: true,
+        message: response,
+        source: 'fallback'
+      });
+    } catch (fallbackError) {
+      console.error('Fallback also failed:', fallbackError);
+      
+      return res.status(500).json({
+        success: false,
+        message: "I'm having trouble processing your request right now. Please try again in a moment.",
+        source: 'error'
+      });
+    }
   }
 });
 
@@ -614,7 +885,7 @@ Overall dental health score: 72/100
   try {
     const analysis = activeAnalyses.get(scanId);
     
-    // Create the prompt
+    // Create the prompt for report generation
     const prompt = `Generate a comprehensive dental report based on the following analysis results:
 ${JSON.stringify(analysis.result, null, 2)}
 
@@ -626,33 +897,43 @@ The report should include:
 
 Format it as a clean text report with clear sections.`;
 
-    // Prepare the request payload for Nova Pro
+    // Prepare payload for Nova Pro using messages-v1 schema
     const payload = {
-      inputs: [
+      schemaVersion: "messages-v1",
+      system: [
         {
-          type: "text",
-          text: prompt
+          text: "You are a dental professional creating comprehensive dental reports from analysis findings."
         }
       ],
-      inference_params: {
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              text: prompt
+            }
+          ]
+        }
+      ],
+      inferenceConfig: {
+        maxTokens: 1500,
         temperature: 0.4,
-        top_p: 0.9,
-        max_tokens: 1000
+        topP: 0.9
       }
     };
 
-    // Invoke the Bedrock model
-    const command = new InvokeModelCommand({
-      modelId: 'anthropic.claude-3-sonnet-20240229-v1:0',
+    // Send the request to Nova Pro
+    console.log('Sending request to Nova Pro for report generation...');
+    const response = await bedrockClient.send(new InvokeModelCommand({
+      modelId: 'amazon.nova-pro-v1:0',
       body: JSON.stringify(payload)
-    });
-
-    console.log('Sending request to Bedrock...');
-    const response = await bedrockClient.send(command);
-    console.log('Response received from Bedrock');
+    }));
     
+    console.log('Response received from Nova Pro');
+    
+    // Extract the text response
     const responseBody = JSON.parse(new TextDecoder().decode(response.body));
-    const report = responseBody.outputs[0].text;
+    const report = responseBody.output.message.content[0].text;
     
     res.json(report);
   } catch (error) {
@@ -701,13 +982,13 @@ router.get('/scan/:scanId', (req, res) => {
   }
   
   // If scan not found or file doesn't exist, send placeholder image
-  const placeholderPath = path.join(__dirname, '../../public/placeholder-scan.jpg');
+  const placeholderPath = path.join(__dirname, '../../public/dental-xray.jpg');
   if (fs.existsSync(placeholderPath)) {
     return res.sendFile(placeholderPath);
   }
   
   // If all else fails, return a redirect to a demo dental scan
-  res.redirect('https://www.shutterstock.com/image-illustration/dental-xray-scan-teeth-3d-260nw-1925303613.jpg');
+  res.redirect('https://img.freepik.com/free-photo/medical-x-ray-teeth-panoramic-scan-oral-exam-dental-clinic-jaws-upper-lower-panorama-scan-clean-teeth_73944-3153.jpg');
 });
 
 /* Test endpoint to check if Bedrock is available */
@@ -732,71 +1013,205 @@ router.get('/test', async (req, res) => {
   }
 });
 
-/* Test endpoint to check if Bedrock is available with detailed test */
+// Health check endpoint
+router.get('/health', async (req, res) => {
+  try {
+    // Verify Bedrock connectivity
+    const isBedrockAvailable = !!bedrockClient;
+    
+    // Basic health status
+    const healthStatus = {
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      services: {
+        server: true,
+        bedrock: isBedrockAvailable
+      },
+      aiConfig: {
+        forceRealApi: AI_CONFIG.FORCE_REAL_API,
+        allowMockFallback: AI_CONFIG.ALLOW_MOCK_FALLBACK,
+        debugMode: AI_CONFIG.DEBUG_MODE,
+        useClaudeModel: AI_CONFIG.USE_CLAUDE
+      }
+    };
+    
+    console.log("Health check response:", JSON.stringify(healthStatus));
+    res.json(healthStatus);
+  } catch (error) {
+    console.error('Health check failed:', error);
+    res.status(500).json({ 
+      status: 'error', 
+      message: 'Health check failed', 
+      error: error.message 
+    });
+  }
+});
+
+// Debug test endpoint for Bedrock API
 router.get('/debug-test', async (req, res) => {
   try {
-    // Check if bedrock client is initialized
     if (!bedrockClient) {
-      return res.json({
-        bedrockInitialized: false,
+      return res.status(503).json({
         testPassed: false,
         error: 'Bedrock client not initialized'
       });
     }
     
-    console.log('Testing Bedrock connection with Amazon Nova Pro...');
+    // Simple test with Nova Pro
+    const modelId = 'amazon.nova-pro-v1:0';
     
-    // Use Nova Pro format - NOT Claude messages format
+    // Simple payload to test connection
     const payload = {
-      modelId: 'amazon.nova-pro-v1:0',
-      contentType: 'application/json',
-      accept: 'application/json',
-      body: JSON.stringify({
-        inputs: [
-          {
-            type: "text",
-            text: "Respond with 'API_TEST_SUCCESS' if you can read this message. This is a connectivity test for a dental AI application."
-          }
-        ],
-        inference_params: {
-          temperature: 0.1,
-          top_p: 0.9,
-          max_tokens: 20
+      messages: [
+        {
+          role: "user",
+          content: "Hello, can you respond with a very short greeting?"
         }
-      })
+      ]
     };
     
-    console.log('Sending test payload to Bedrock:', JSON.stringify(payload).substring(0, 200));
+    console.log('Testing Bedrock API connection with a simple message...');
     
-    const command = new InvokeModelCommand(payload);
+    // Use InvokeModel
+    const command = new InvokeModelCommand({
+      modelId: modelId,
+      contentType: 'application/json',
+      accept: 'application/json',
+      body: JSON.stringify(payload)
+    });
+    
+    // Send the request
     const response = await bedrockClient.send(command);
     
-    // Parse the response
-    const responseBody = Buffer.from(response.body).toString('utf8');
-    const parsedResponse = JSON.parse(responseBody);
+    // Parse response
+    const responseBody = JSON.parse(new TextDecoder().decode(response.body));
     
-    console.log('Bedrock test response:', JSON.stringify(parsedResponse).substring(0, 200));
-    
-    // Check for expected response in Nova Pro format
-    const outputText = parsedResponse.outputs?.[0]?.text || '';
-    const testPassed = outputText.includes('API_TEST_SUCCESS') || 
-                      outputText.includes('connectivity test') ||
-                      outputText.toLowerCase().includes('dental');
-    
-    return res.json({
-      bedrockInitialized: true,
-      testPassed,
-      response: parsedResponse,
-      outputText
-    });
+    // Check for a valid response
+    if (responseBody && 
+        ((responseBody.content && responseBody.content.length > 0) || 
+         (responseBody.outputs && responseBody.outputs.length > 0))) {
+      
+      return res.json({
+        testPassed: true,
+        message: 'Successfully connected to Bedrock API',
+        modelUsed: modelId
+      });
+    } else {
+      return res.status(500).json({
+        testPassed: false,
+        error: 'Invalid response format from Bedrock API',
+        details: JSON.stringify(responseBody).substring(0, 200)
+      });
+    }
   } catch (error) {
-    console.error('Error testing Bedrock:', error);
-    return res.json({
-      bedrockInitialized: !!bedrockClient,
+    console.error('Bedrock API test failed:', error);
+    return res.status(500).json({
       testPassed: false,
       error: error.message,
-      details: error.toString()
+      stack: error.stack
     });
+  }
+});
+
+// Simple test endpoint that doesn't use AI
+router.get('/test-simple', async (req, res) => {
+  console.log('Simple test endpoint called');
+  
+  try {
+    return res.json({
+      success: true,
+      message: "This is a test response that doesn't use AI.",
+      source: 'hardcoded'
+    });
+  } catch (error) {
+    console.error('Error in simple test endpoint:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Error in test endpoint',
+      source: 'error'
+    });
+  }
+});
+
+// Simple chat test endpoint that doesn't use AI
+router.post('/chat-test', async (req, res) => {
+  console.log('Simple chat test endpoint called');
+  const { message } = req.body;
+  
+  try {
+    // Return different responses based on input
+    let response = "I'm a dental assistant and I can help answer your questions about dental health.";
+    
+    if (message.toLowerCase().includes('hello') || message.toLowerCase().includes('hi')) {
+      response = "Hello! I'm your dental assistant. How can I help with your dental health today?";
+    } 
+    else if (message.toLowerCase().includes('tooth') || message.toLowerCase().includes('teeth')) {
+      response = "It's important to brush your teeth twice daily and floss regularly to maintain good dental health.";
+    }
+    else if (message.toLowerCase().includes('pain') || message.toLowerCase().includes('hurt')) {
+      response = "Dental pain should be evaluated by a dentist as soon as possible. Would you like to schedule an appointment?";
+    }
+    else if (message.toLowerCase().includes('clean') || message.toLowerCase().includes('cleaning')) {
+      response = "Regular dental cleanings every 6 months are recommended for optimal oral health.";
+    }
+    
+    return res.json({
+      success: true,
+      message: response,
+      source: 'hardcoded'
+    });
+  } catch (error) {
+    console.error('Error in simple chat test endpoint:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Error processing your request',
+      source: 'error'
+    });
+  }
+});
+
+// Helper function to get analysis status
+async function getAnalysisStatus(scanId) {
+  if (!scanId) {
+    return { status: 'unknown', error: 'No scan ID provided' };
+  }
+  
+  if (activeAnalyses.has(scanId)) {
+    const analysis = activeAnalyses.get(scanId);
+    return { 
+      status: analysis.status,
+      progress: analysis.progress || 0,
+      _source: analysis._source || 'unknown'
+    };
+  }
+  
+  return { status: 'unknown', error: 'Analysis not found' };
+}
+
+// Helper function to get analysis result
+async function getAnalysisResult(scanId) {
+  if (!scanId || !activeAnalyses.has(scanId)) {
+    throw new Error('Analysis not found');
+  }
+  
+  const analysis = activeAnalyses.get(scanId);
+  
+  if (analysis.status !== 'completed' || !analysis.result) {
+    throw new Error(`Analysis is not completed (status: ${analysis.status})`);
+  }
+  
+  return analysis.result;
+}
+
+// Route to serve files from the public directory
+router.get('/public/:fileName', (req, res) => {
+  const { fileName } = req.params;
+  const filePath = path.join(__dirname, '../../public', fileName);
+  
+  if (fs.existsSync(filePath)) {
+    return res.sendFile(filePath);
+  } else {
+    return res.status(404).json({ error: 'File not found' });
   }
 });
 

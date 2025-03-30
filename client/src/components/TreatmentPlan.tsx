@@ -11,6 +11,7 @@ interface TreatmentStep {
   step: string;
   description: string;
   timeframe: string;
+  severity?: 'severe' | 'moderate' | 'mild';
 }
 
 // Interface for the complete treatment plan
@@ -23,6 +24,7 @@ interface ITreatmentPlan {
   estimatedDuration: string;
   estimatedCost: string;
   severity: 'low' | 'medium' | 'high';
+  _source: string;
 }
 
 // Mock data for demo mode
@@ -56,7 +58,8 @@ const MOCK_TREATMENT_PLAN: ITreatmentPlan = {
   ],
   estimatedDuration: '2-3 months',
   estimatedCost: '$800-1200',
-  severity: 'medium'
+  severity: 'medium',
+  _source: 'mock'
 };
 
 interface TreatmentPlanProps {
@@ -91,28 +94,30 @@ export const TreatmentPlan: React.FC<TreatmentPlanProps> = ({ patientId, scanId 
   }, []);
 
   useEffect(() => {
+    // Reset state when new scan ID is provided
+    if (scanId) {
+      setPlan(null);
+      setPlanRequested(false);
+      setError(null);
+    }
+    
     // Don't fetch if API is already known to be unavailable
     if (!apiAvailable) return;
 
-    // Automatically use demo mode if patient ID starts with "demo"
-    if (patientId.startsWith('demo')) {
+    // Only use demo mode for pure demo scanIds or patientIds
+    const isDemoScan = scanId && scanId.startsWith('demo-scan-');
+    const isDemoPatient = patientId && patientId.startsWith('demo') && !scanId;
+    
+    if (isDemoScan || isDemoPatient) {
+      console.log('Using demo mode for treatment plan');
       setDemoMode(true);
       setPlan(MOCK_TREATMENT_PLAN);
       setLoading(false);
       return;
     }
     
-    // If no scanId is provided while viewing the treatment plan and we're using
-    // a demo patient, generate a dummy plan anyway
-    if (!scanId && patientId.startsWith('demo')) {
-      setDemoMode(true);
-      setPlan(MOCK_TREATMENT_PLAN);
-      setLoading(false);
-      return;
-    }
-    
-    // For non-demo mode, we need a scanId to generate a treatment plan
-    if (!scanId && !patientId.startsWith('demo')) {
+    // For non-demo mode with no scanId, don't fetch anything
+    if (!scanId && !isDemoPatient) {
       setLoading(false);
       return;
     }
@@ -124,6 +129,56 @@ export const TreatmentPlan: React.FC<TreatmentPlanProps> = ({ patientId, scanId 
       
       try {
         console.log(`Requesting treatment plan for patient ${patientId}${scanId ? ` and scan ${scanId}` : ''}`);
+        
+        // Check if real-time analysis is available 
+        const isRealTimeAvailable = await ai.isRealTimeAvailable();
+        
+        if (!isRealTimeAvailable) {
+          console.log('Real-time Bedrock analysis unavailable, using demo mode');
+          setDemoMode(true);
+          setPlan(MOCK_TREATMENT_PLAN);
+          setLoading(false);
+          return;
+        }
+        
+        // If we have a scanId, first check if the analysis is completed
+        if (scanId) {
+          // Check analysis status and wait for completion if needed
+          let analysisStatus;
+          let attempts = 0;
+          const maxAttempts = 10; // Try checking 10 times
+          
+          while (attempts < maxAttempts) {
+            try {
+              analysisStatus = await ai.getAnalysisStatus(scanId);
+              console.log(`Analysis status for scan ${scanId}: ${analysisStatus.status}`);
+              
+              if (analysisStatus.status === 'completed') {
+                console.log('Analysis is completed, can proceed with treatment plan');
+                break;
+              } else if (analysisStatus.status === 'failed') {
+                throw new Error('Analysis failed, cannot generate treatment plan');
+              }
+              
+              // If still processing, wait a bit and check again
+              if (analysisStatus.status === 'processing') {
+                console.log('Analysis still processing, waiting...');
+                await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds
+                attempts++;
+              } else {
+                // Unknown status, move on
+                break;
+              }
+            } catch (error) {
+              console.error('Error checking analysis status:', error);
+              break;
+            }
+          }
+          
+          if (attempts >= maxAttempts) {
+            console.log('Timed out waiting for analysis to complete');
+          }
+        }
         
         // Request treatment plan from API - pass scanId if available
         const response = await ai.getTreatmentPlan(patientId, scanId);
@@ -253,6 +308,17 @@ export const TreatmentPlan: React.FC<TreatmentPlanProps> = ({ patientId, scanId 
   return (
     <Card>
       <CardContent>
+        <Typography variant="h6" sx={{ mb: 2 }}>
+          Treatment Plan {demoMode ? "(Demo Mode)" : 
+            (plan._source === 'mock' ? "(Mock Data)" : "")}
+        </Typography>
+
+        {plan._source === 'mock' && (
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            Using mock treatment plan data instead of real-time generation. This is demo data and not based on the uploaded scan.
+          </Alert>
+        )}
+        
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
           <Typography variant="h6">
             AI-Generated Treatment Plan {demoMode && "(Demo Mode)"}
@@ -271,9 +337,9 @@ export const TreatmentPlan: React.FC<TreatmentPlanProps> = ({ patientId, scanId 
         <Box sx={{ display: 'flex', gap: 2, mb: 2, alignItems: 'center' }}>
           <Typography variant="subtitle1">Overall Severity:</Typography>
           <Chip 
-            label={plan.severity.toUpperCase()} 
+            label={(plan.severity || 'medium').toUpperCase()} 
             sx={{ 
-              bgcolor: getSeverityColor(plan.severity),
+              bgcolor: getSeverityColor(plan.severity || 'medium'),
               color: 'white',
               fontWeight: 'bold'
             }} 
@@ -314,11 +380,24 @@ export const TreatmentPlan: React.FC<TreatmentPlanProps> = ({ patientId, scanId 
                   p: 2, 
                   width: '100%',
                   borderLeft: '4px solid',
-                  borderColor: 'primary.main'
+                  borderColor: step.severity ? getSeverityColor(step.severity) : 'primary.main'
                 }}
               >
                 <Typography variant="subtitle1" gutterBottom>
                   {index + 1}. {step.step}
+                  {step.severity && (
+                    <Chip 
+                      label={step.severity.toUpperCase()} 
+                      size="small"
+                      sx={{ 
+                        ml: 1,
+                        bgcolor: getSeverityColor(step.severity),
+                        color: 'white',
+                        fontSize: '0.7rem',
+                        height: 20
+                      }} 
+                    />
+                  )}
                 </Typography>
                 <Typography variant="body2" paragraph>
                   {step.description}

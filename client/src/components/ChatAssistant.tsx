@@ -1,12 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import React, { useState, useEffect, useRef } from 'react';
 import { ai } from '../services/ai';
-import { 
-  Box, Typography, TextField, Button, Card, CardContent, 
-  Paper, Alert, CircularProgress, IconButton
-} from '@mui/material';
+import { Box, Card, CardContent, Typography, TextField, IconButton, Paper } from '@mui/material';
 import SendIcon from '@mui/icons-material/Send';
-import axios from 'axios';
+import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 
 interface ChatAssistantProps {
   patientId: string;
@@ -15,211 +11,249 @@ interface ChatAssistantProps {
 interface Message {
   id: string;
   content: string;
-  sender: 'user' | 'assistant';
+  role: 'user' | 'assistant';
   timestamp: Date;
 }
 
-// Mock responses for demo mode
-const MOCK_RESPONSES = [
-  'Based on your dental scan, I recommend scheduling a cleaning appointment.',
-  'Your cavity on tooth #14 should be treated within the next 2-3 weeks.',
-  'Gum disease is at an early stage and can be managed with proper oral hygiene.',
-  'I suggest using a soft-bristled toothbrush and fluoride toothpaste.',
-  'Regular flossing will help with your gum health significantly.',
-  'You should see improvements within 2 weeks of following the recommended treatment plan.',
-  'Would you like me to explain the filling procedure in more detail?',
-  'I recommend scheduling a follow-up appointment in 3 months.'
-];
-
-export const ChatAssistant: React.FC<ChatAssistantProps> = ({ patientId }) => {
+const ChatAssistant: React.FC<ChatAssistantProps> = ({ patientId }) => {
   const [messages, setMessages] = useState<Message[]>([
-    {
-      id: '1',
-      content: 'Hello! I\'m your dental AI assistant. How can I help you today?',
-      sender: 'assistant',
+    { 
+      id: '0', 
+      role: 'assistant', 
+      content: 'Hello! I\'m your dental assistant. How can I help you today?',
       timestamp: new Date()
     }
   ]);
   const [input, setInput] = useState('');
-  const [useLocalMock, setUseLocalMock] = useState(false);
-  const [lastUserMessage, setLastUserMessage] = useState('');
-  const [apiAvailable, setApiAvailable] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
+  const [apiSource, setApiSource] = useState<string | null>(null);
+  const endOfMessagesRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const [showScrollButton, setShowScrollButton] = useState(false);
 
-  // Check API availability when component mounts
+  // Preserve scroll position when new messages are added
   useEffect(() => {
-    const checkApiAvailability = async () => {
-      try {
-        await axios.get('http://localhost:3001/api/health', { timeout: 2000 });
-        setApiAvailable(true);
-      } catch (err) {
-        console.log('API not available, using mock responses');
-        setApiAvailable(false);
-        setUseLocalMock(true);
+    if (messagesContainerRef.current && messages.length > 1) {
+      const container = messagesContainerRef.current;
+      const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
+      
+      if (isNearBottom) {
+        // Auto-scroll only if user was already at the bottom
+        scrollToBottom();
+      } else {
+        // If user has scrolled up, maintain their position
+        setShowScrollButton(true);
+      }
+    }
+  }, [messages]);
+
+  // Monitor scroll position
+  useEffect(() => {
+    const handleScroll = () => {
+      if (messagesContainerRef.current) {
+        const container = messagesContainerRef.current;
+        const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
+        
+        setShowScrollButton(!isNearBottom);
       }
     };
-    
-    checkApiAvailability();
+
+    const container = messagesContainerRef.current;
+    if (container) {
+      container.addEventListener('scroll', handleScroll);
+      return () => container.removeEventListener('scroll', handleScroll);
+    }
   }, []);
 
-  // Automatically use demo mode if patient ID starts with "demo"
-  useEffect(() => {
-    if (patientId.startsWith('demo') || !apiAvailable) {
-      setUseLocalMock(true);
-    }
-  }, [patientId, apiAvailable]);
+  const scrollToBottom = () => {
+    endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' });
+    setShowScrollButton(false);
+  };
 
-  const chatMutation = useMutation({
-    mutationFn: async (message: string) => {
-      // If using mock mode or API unavailable, return mock response
-      if (useLocalMock) {
-        console.log('Using mock response for chat');
-        // Simulate a delay for a more realistic experience
-        await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 1000));
-        return MOCK_RESPONSES[Math.floor(Math.random() * MOCK_RESPONSES.length)];
-      }
-      
-      // Otherwise use the real API with chat history
-      console.log(`Sending chat message to API for patient ${patientId}`);
-      
-      // Include the last 5 messages for context
-      const contextHistory = messages
-        .slice(-5)
-        .map(msg => ({
-          role: msg.sender,
-          content: msg.content
-        }));
-      
-      return ai.askQuestion(patientId, message, contextHistory);
-    },
-    onSuccess: (response) => {
-      const newMessage: Message = {
-        id: Date.now().toString(),
-        content: response,
-        sender: 'assistant',
-        timestamp: new Date()
-      };
-      setMessages(prev => [...prev, newMessage]);
-    },
-    onError: (error) => {
-      console.error('Chat error:', error);
-      
-      // If API fails and we're not already in mock mode, switch to mock mode
-      if (!useLocalMock) {
-        setUseLocalMock(true);
-        // Add error message
-        const errorMessage: Message = {
-          id: Date.now().toString(),
-          content: `Sorry, I'm having trouble connecting to the server. I'll switch to demo mode.`,
-          sender: 'assistant',
-          timestamp: new Date()
-        };
-        setMessages(prev => [...prev, errorMessage]);
-        
-        // Retry with mock mode
-        setTimeout(() => {
-          chatMutation.mutate(lastUserMessage);
-        }, 1000);
-      }
-    }
-  });
-
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim()) return;
+    if (!input.trim() || isLoading) return;
 
+    // Create user message
     const userMessage: Message = {
       id: Date.now().toString(),
-      content: input,
-      sender: 'user',
+      role: 'user',
+      content: input.trim(),
       timestamp: new Date()
     };
-
-    setLastUserMessage(input);
+    
+    // Add to messages and clear input
     setMessages(prev => [...prev, userMessage]);
-    chatMutation.mutate(input);
     setInput('');
+    setIsLoading(true);
+    
+    try {
+      console.log(`Sending message to AI: ${userMessage.content}`);
+      
+      // Get chat history (last 5 messages maximum)
+      const chatHistory = messages.slice(-5).map(msg => ({
+        role: msg.role,
+        content: msg.content
+      }));
+      
+      // Send to AI service 
+      const response = await ai.sendChatMessage(userMessage.content, patientId, chatHistory);
+      console.log('Received response:', response);
+      
+      // Add AI response to chat
+      const assistantMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: response.message || "I'm sorry, I couldn't process your request.",
+        timestamp: new Date()
+      };
+      
+      setMessages(prev => [...prev, assistantMessage]);
+      
+      // Track where the response came from (for debugging)
+      setApiSource(response.source || 'unknown');
+    } catch (error) {
+      console.error('Error sending message:', error);
+      
+      // Add error message to chat
+      const errorMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: "I'm having trouble connecting to the AI service right now. Please try again in a moment.",
+        timestamp: new Date()
+      };
+      
+      setMessages(prev => [...prev, errorMessage]);
+      setApiSource('error');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
-    <Card>
-      <CardContent>
-        <Typography variant="h6" gutterBottom>
-          AI Dental Assistant {useLocalMock && "(Demo Mode)"}
+    <Card variant="outlined" sx={{ height: '500px', display: 'flex', flexDirection: 'column' }}>
+      <CardContent sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', p: 2, position: 'relative' }}>
+        <Typography variant="h6" component="h2" gutterBottom>
+          Chat Assistant
         </Typography>
         
-        {useLocalMock && (
-          <Alert severity="info" sx={{ mb: 2 }}>
-            Running in demo mode with simulated responses.
-          </Alert>
-        )}
-
-        <Paper 
-          elevation={0} 
-          variant="outlined" 
+        <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+          <Box sx={{ 
+            width: 8, 
+            height: 8, 
+            borderRadius: '50%', 
+            bgcolor: 'success.main',
+            mr: 1 
+          }} />
+          <Typography variant="body2">Online</Typography>
+          
+          {apiSource && (
+            <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto' }}>
+              Source: {apiSource}
+            </Typography>
+          )}
+        </Box>
+        
+        <Box 
+          ref={messagesContainerRef}
           sx={{ 
-            height: '400px', 
-            mb: 2, 
-            p: 2,
-            overflow: 'auto',
+            flexGrow: 1, 
+            overflow: 'auto', 
+            mb: 2,
             display: 'flex',
             flexDirection: 'column',
-            gap: 1
+            gap: 1,
+            pr: 1,
+            pl: 1,
+            pt: 1,
+            height: '350px',
+            '&::-webkit-scrollbar': {
+              width: '8px',
+            },
+            '&::-webkit-scrollbar-track': {
+              background: '#f1f1f1',
+              borderRadius: '4px',
+            },
+            '&::-webkit-scrollbar-thumb': {
+              background: '#888', 
+              borderRadius: '4px',
+            },
+            '&::-webkit-scrollbar-thumb:hover': {
+              background: '#555',
+            },
           }}
         >
           {messages.map((message) => (
-            <Box
-              key={message.id}
-              sx={{
-                display: 'flex',
-                justifyContent: message.sender === 'user' ? 'flex-end' : 'flex-start',
+            <Box 
+              key={message.id} 
+              sx={{ 
+                display: 'flex', 
+                justifyContent: message.role === 'user' ? 'flex-end' : 'flex-start',
                 mb: 1
               }}
             >
-              <Paper
-                elevation={1}
-                sx={{
-                  p: 1.5,
-                  maxWidth: '75%',
-                  bgcolor: message.sender === 'user' ? 'primary.main' : 'grey.100',
-                  color: message.sender === 'user' ? 'white' : 'text.primary',
+              <Paper 
+                elevation={1} 
+                sx={{ 
+                  p: 2, 
+                  maxWidth: '80%',
+                  bgcolor: message.role === 'user' ? 'primary.light' : 'grey.100',
                   borderRadius: '8px'
                 }}
               >
-                <Typography variant="body1">{message.content}</Typography>
-                <Typography variant="caption" color={message.sender === 'user' ? 'rgba(255,255,255,0.7)' : 'text.secondary'}>
-                  {message.timestamp.toLocaleTimeString()}
+                <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
+                  {message.content}
                 </Typography>
               </Paper>
             </Box>
           ))}
           
-          {chatMutation.isPending && (
+          {isLoading && (
             <Box sx={{ display: 'flex', justifyContent: 'flex-start', mb: 1 }}>
               <Paper elevation={1} sx={{ p: 2, bgcolor: 'grey.100', borderRadius: '8px' }}>
-                <Box sx={{ display: 'flex', gap: 0.5 }}>
-                  <CircularProgress size={12} />
-                  <CircularProgress size={12} sx={{ animationDelay: '0.2s' }} />
-                  <CircularProgress size={12} sx={{ animationDelay: '0.4s' }} />
-                </Box>
+                <Typography variant="body2">Typing...</Typography>
               </Paper>
             </Box>
           )}
-        </Paper>
-
-        <Box component="form" onSubmit={handleSubmit} sx={{ display: 'flex', gap: 1 }}>
+          
+          <div ref={endOfMessagesRef} />
+        </Box>
+        
+        {showScrollButton && (
+          <IconButton 
+            size="small" 
+            color="primary" 
+            onClick={scrollToBottom}
+            sx={{ 
+              position: 'absolute', 
+              bottom: 80, 
+              right: 20, 
+              zIndex: 2,
+              backgroundColor: 'white',
+              boxShadow: 2,
+              '&:hover': {
+                backgroundColor: 'grey.100',
+              }
+            }}
+          >
+            <ArrowDownwardIcon fontSize="small" />
+          </IconButton>
+        )}
+        
+        <Box component="form" onSubmit={handleSubmit} sx={{ mt: 'auto' }}>
           <TextField
             fullWidth
             size="small"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="Ask a dental question..."
-            disabled={chatMutation.isPending}
+            disabled={isLoading}
             InputProps={{
               endAdornment: (
                 <IconButton 
                   type="submit"
                   color="primary"
-                  disabled={chatMutation.isPending || !input.trim()}
+                  disabled={isLoading || !input.trim()}
                 >
                   <SendIcon />
                 </IconButton>
@@ -230,4 +264,6 @@ export const ChatAssistant: React.FC<ChatAssistantProps> = ({ patientId }) => {
       </CardContent>
     </Card>
   );
-}; 
+};
+
+export default ChatAssistant; 

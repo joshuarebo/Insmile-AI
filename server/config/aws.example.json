@@ -1,0 +1,12 @@
+{
+  "region": "us-east-1",
+  "credentials": {
+    "accessKeyId": "YOUR_AWS_ACCESS_KEY_ID",
+    "secretAccessKey": "YOUR_AWS_SECRET_ACCESS_KEY"
+  },
+  "models": {
+    "text": "amazon.nova-pro-v1:0",
+    "image": "amazon.titan-image-generator-v1:0"
+  },
+  "_comment": "Replace the placeholder values with your actual AWS credentials. You need access to Amazon Bedrock with the Nova Pro and Titan Image Generator models."
+} 

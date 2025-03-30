@@ -13,8 +13,8 @@ interface ScanViewerProps {
   highlightFindings?: boolean;
 }
 
-// Default dental scan placeholder
-const DEFAULT_IMAGE = 'https://img.freepik.com/premium-photo/dental-xray-panoramic-teeth-scan-with-implants-prosthetic-brackets_190619-2145.jpg';
+// Default dental scan placeholder - professionally marked dental X-ray with analysis indicators
+const DEFAULT_IMAGE = 'http://localhost:3001/api/public/dental-marked.jpg';
 
 export const ScanViewer: React.FC<ScanViewerProps> = ({ 
   scanId, 

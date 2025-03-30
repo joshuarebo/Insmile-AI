@@ -1,18 +1,28 @@
 {
   "name": "insmile-ai",
   "version": "1.0.0",
-  "description": "AI-powered dental analysis system",
-  "main": "index.js",
+  "description": "AI-powered dental scan analysis platform",
   "scripts": {
-    "start": "concurrently \"npm run start:server\" \"npm run start:client\"",
-    "start:server": "cd server && npm start",
+    "install:all": "npm run install:server && npm run install:client",
+    "install:server": "cd server && npm install",
+    "install:client": "cd client && npm install",
+    "start:server": "cd server && npm run dev",
     "start:client": "cd client && npm start",
-    "install:all": "npm install && cd client && npm install && cd ../server && npm install"
+    "start": "concurrently \"npm run start:server\" \"npm run start:client\"",
+    "build": "npm run build:client",
+    "build:client": "cd client && npm run build"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": [
+    "dental",
+    "AI",
+    "healthcare",
+    "scan analysis",
+    "treatment planning"
+  ],
+  "author": "Your Name",
+  "license": "UNLICENSED",
+  "private": true,
   "devDependencies": {
-    "concurrently": "^8.2.2"
+    "concurrently": "^8.0.1"
   }
 }

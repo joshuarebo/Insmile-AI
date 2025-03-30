@@ -5,6 +5,11 @@ const logger = require('morgan');
 const cors = require('cors');
 const mongoose = require('mongoose');
 
+// Initialize global trackers for patient data to enhance context awareness
+global.activeAnalyses = new Map(); // Will store scan analyses
+global.patientTreatmentPlans = {}; // Will store treatment plans by patient ID
+global.patientChatContexts = {}; // Will store chat context by patient ID
+
 const indexRouter = require('./routes/index');
 const usersRouter = require('./routes/users');
 const authRouter = require('./routes/auth');
