@@ -27,7 +27,7 @@ server/uploads/*
 !/server/uploads/.gitkeep
 
 # credentials
-/server/config/aws.json
+server/config/aws.json
 
 dist
 server/public
