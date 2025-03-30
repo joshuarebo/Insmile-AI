@@ -21,33 +21,17 @@ export const errorHandler = (
   res: Response,
   next: NextFunction
 ) => {
-  console.error('Error:', err);
-
   if (err instanceof AppError) {
     return res.status(err.statusCode).json({
       status: err.status,
-      message: err.message
+      message: err.message,
     });
   }
 
-  // Handle JWT errors
-  if (err.name === 'JsonWebTokenError') {
-    return res.status(401).json({
-      status: 'fail',
-      message: 'Invalid token'
-    });
-  }
+  console.error('Error:', err);
 
-  if (err.name === 'TokenExpiredError') {
-    return res.status(401).json({
-      status: 'fail',
-      message: 'Token expired'
-    });
-  }
-
-  // Default error
   return res.status(500).json({
     status: 'error',
-    message: 'Internal server error'
+    message: 'Something went wrong',
   });
 }; 
