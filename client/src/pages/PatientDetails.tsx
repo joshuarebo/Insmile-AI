@@ -6,6 +6,7 @@ import { ScanUploader } from '../components/ScanUploader';
 import AIAnalysis from '../components/AIAnalysis';
 import ChatAssistant from '../components/ChatAssistant';
 import { TreatmentPlan } from '../components/TreatmentPlan';
+import { API_BASE_URL, scanImageUrl } from '../services/ai';
 
 interface Patient {
   id: string;
@@ -37,7 +38,7 @@ const PatientDetails = () => {
   useEffect(() => {
     const fetchPatient = async () => {
       try {
-        const response = await axios.get(`http://localhost:3001/api/patients/${id}`);
+        const response = await axios.get(`${API_BASE_URL}/patients/${id}`);
         setPatient(response.data);
       } catch (err: any) {
         setError(err.message || 'Failed to fetch patient details');
@@ -46,7 +47,7 @@ const PatientDetails = () => {
 
     const fetchScans = async () => {
       try {
-        const response = await axios.get(`http://localhost:3001/api/scans/patient/${id}`);
+        const response = await axios.get(`${API_BASE_URL}/scans/patient/${id}`);
         setScans(response.data);
       } catch (err: any) {
         console.error('Error fetching scans:', err);
@@ -68,7 +69,7 @@ const PatientDetails = () => {
     setShowAnalysisComponent(true);
     
     // Refresh the scan list
-    axios.get(`http://localhost:3001/api/scans/patient/${id}`)
+    axios.get(`${API_BASE_URL}/scans/patient/${id}`)
       .then(response => {
         setScans(response.data);
         setActiveTab(1); // Switch to the Analysis tab
@@ -188,7 +189,7 @@ const PatientDetails = () => {
                     </Typography>
                     <Box sx={{ mt: 2, textAlign: 'center' }}>
                       <img 
-                        src={`http://localhost:3001/api/scans/${scan.id}/image`}
+                        src={`${API_BASE_URL}/scans/${scan.id}/image`}
                         alt="Dental scan" 
                         style={{ maxHeight: 150, maxWidth: '100%', objectFit: 'contain' }}
                         onError={(e) => {
