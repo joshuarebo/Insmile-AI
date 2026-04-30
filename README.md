@@ -1,120 +1,117 @@
-# Insmile AI - Dental Analysis Platform
+# Insmile AI — Dental Treatment Planning for Kenya
 
-Insmile AI is a powerful dental analysis platform that leverages AI to provide instant, accurate analysis of dental scans, generate treatment plans, and assist with patient communication.
+Insmile AI is an AI-assisted dental workflow tool tailored for Kenyan clinics. It lets a
+dentist upload a scan (X-ray, panoramic, or intraoral photo), see AI-highlighted findings
+drawn directly on the image, generate a **Kenya-priced treatment plan** (KES, SHA-aware),
+and chat with a locally-grounded assistant.
 
-## Features
+## What's in the box
 
-- **Real-time Dental Scan Analysis**: Upload and analyze panoramic dental X-rays
-- **AI-Powered Findings**: Detect cavities, gum disease, and other dental issues
-- **Treatment Plan Generation**: Get AI-generated treatment plans based on analysis
-- **Patient Dashboard**: Manage patient records and scan history
-- **AI Chat Assistant**: Answer patient questions about dental health
-- **Report Generation**: Create comprehensive dental reports
+- **React 19 + MUI + Tailwind** frontend with a scan viewer, tabbed AI workspace, patient
+  and scan pages, and a clean Kenyan branding.
+- **Node.js / Express** backend with filesystem-backed storage — no DB to provision.
+- **OpenRouter** for AI: vision findings via Gemma 3 27B, chat + treatment plans via
+  Llama 3.3 70B. Both are free-tier models.
+- **Kenya-specific clinical context** baked into every prompt: SHA coverage, KES pricing
+  bands (public / private mid / private premium), referral pathways (Level 2 → Level 6),
+  epidemiology (fluorosis, ANUG, early-childhood caries), Kiswahili-friendly patient
+  education.
 
-## Technology Stack
-
-- **Frontend**: React, Material UI
-- **Backend**: Node.js, Express
-- **AI Integration**: Amazon Bedrock with Nova Pro model
-- **Image Processing**: Custom algorithms for dental scan analysis
-
-## Setup Instructions
+## Quick start
 
 ### Prerequisites
 
-- Node.js (v14 or higher)
-- NPM or Yarn
-- AWS account with access to Amazon Bedrock
+- Node.js 18+
+- An OpenRouter API key (free): https://openrouter.ai/keys
 
-### Installation
+### Install
 
-1. Clone the repository
-   ```
-   git clone https://github.com/yourusername/insmile-ai.git
-   cd insmile-ai
-   ```
+```bash
+# from repo root
+npm install --prefix server
+npm install --prefix client
+```
 
-2. Install dependencies
-   ```
-   # Install server dependencies
-   cd server
-   npm install
+### Configure
 
-   # Install client dependencies
-   cd ../client
-   npm install
-   ```
+Create `server/.env` (or copy from `server/.env.example`) and set your API key:
 
-3. Configure AWS credentials
+```env
+PORT=3001
+OPENROUTER_API_KEY=sk-or-v1-...
+OPENROUTER_TEXT_MODEL=meta-llama/llama-3.3-70b-instruct:free
+OPENROUTER_VISION_MODEL=google/gemma-3-27b-it:free
+JWT_SECRET=anything
+```
 
-   Copy the example configuration file:
-   ```
-   cp server/config/aws.example.json server/config/aws.json
-   ```
+### Seed demo data (optional)
 
-   Then edit `server/config/aws.json` with your AWS credentials:
-   ```json
-   {
-     "region": "us-east-1",
-     "credentials": {
-       "accessKeyId": "YOUR_AWS_ACCESS_KEY_ID",
-       "secretAccessKey": "YOUR_AWS_SECRET_ACCESS_KEY"
-     }
-   }
-   ```
+```bash
+node server/scripts/seed.js
+```
 
-4. Start the application
-   ```
-   # Start the server (from the server directory)
-   npm run dev
+This registers two demo patients (Amina Wanjiru, Brian Otieno) and attaches the first
+available scan from `server/uploads/` so the UI has something to show on first load.
 
-   # Start the client (from the client directory)
-   npm start
-   ```
+### Run
 
-## Usage Guide
+```bash
+# from repo root — starts server on :3001 and client on :3000
+npm start
+```
 
-1. **Patient Management**
-   - Create and manage patient profiles
-   - View patient history and previous scans
+Or in two terminals:
 
-2. **Scan Analysis**
-   - Upload dental scans (X-rays, panoramic images)
-   - Get AI-powered analysis with identified issues
-   - View detailed findings with confidence scores
+```bash
+npm run start:server    # :3001
+npm run start:client    # :3000
+```
 
-3. **Treatment Planning**
-   - Generate AI-based treatment plans
-   - Customize and adapt plans as needed
-   - Explain treatments to patients with visual aids
+Open http://localhost:3000 — log in with any email/password (demo auth).
 
-4. **AI Assistant**
-   - Chat with the AI dental assistant
-   - Answer patient questions
-   - Provide dental health information
+## Project layout
 
-## Customization
+```
+client/                      React app (Create React App + MUI + Tailwind)
+  src/
+    components/              ScanViewer, AIAnalysis, TreatmentPlan, ChatAssistant, ...
+    pages/                   Login, Dashboard, AIDashboard, Patients, Scans, ...
+    services/ai.ts           Typed client for the AI API (analysis + chat + plan)
+server/
+  src/
+    services/openrouter.js   OpenRouter integration (vision + chat + plan)
+    services/ai.js           Thin facade re-exporting openrouter.js
+    routes/ai.js             /api/ai/* endpoints
+    routes/scans.js          /api/scans/* endpoints (upload, list, image serving)
+    routes/patients.js       /api/patients/* endpoints
+    store.js                 JSON file store (server/data/*.json) — no DB required
+  scripts/seed.js            Demo seed
+  uploads/                   User-uploaded scan files
+```
 
-The application can be customized in several ways:
+## How the AI pipeline works
 
-- **Branding**: Update logos and colors in the client theme
-- **AI Models**: Configure different AI models in the server settings
-- **Analysis Parameters**: Adjust sensitivity and detection thresholds
+1. A dentist uploads a scan. The file is stored in `server/uploads/` and registered in
+   `server/data/scans.json`.
+2. The scan is passed to **Gemma 3 27B** via OpenRouter with a strict JSON schema. The
+   model returns findings with normalized bounding boxes (`bbox_norm: [x, y, w, h]` in
+   0..1 image coordinates), FDI tooth numbers where identifiable, severity, and
+   recommendations.
+3. `ScanViewer.tsx` overlays the bounding boxes directly on the scan and highlights the
+   selected finding.
+4. The treatment plan endpoint passes findings to **Llama 3.3 70B** with a Kenya-aware
+   system prompt. The model returns a structured plan with KES prices across public /
+   private-mid / private-premium bands and SHA coverage flags per step.
+5. The chat assistant uses the same text model plus the patient's latest analysis and
+   active treatment plan as context.
 
-## Licensing
+## Notes on the AI models
 
-This is a commercial product. Please contact us for licensing options:
+Both `google/gemma-3-27b-it:free` and `meta-llama/llama-3.3-70b-instruct:free` are free
+tier and may occasionally return HTTP 429 when upstream providers are rate-limiting. The
+server surfaces the error; just retry. For production load, register for a paid
+OpenRouter tier or point to a self-hosted model.
 
-- Email: your.email@example.com
-- Website: https://www.example.com
+## License
 
-## Support
-
-For technical support, please contact our support team:
-
-- Technical Support: support@example.com
-- Phone: +1 (123) 456-7890
-
-## Legal Notice
-
-Insmile AI is intended to be used as a decision support tool by dental professionals. It should not replace professional judgment or diagnosis. Always defer to your professional training and expertise when making patient care decisions. 
+Private / proprietary. See `LICENSE`.

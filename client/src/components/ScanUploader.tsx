@@ -1,254 +1,141 @@
-import React, { useState } from 'react';
-import axios from 'axios';
-import { 
-  Button, 
-  Typography, 
-  Box, 
-  Card, 
-  CardContent, 
-  CircularProgress, 
+import React, { useCallback, useState } from 'react';
+import { useDropzone } from 'react-dropzone';
+import {
+  Box,
+  Button,
+  Card,
+  CardContent,
+  CircularProgress,
+  Stack,
+  Typography,
   Alert,
-  Paper,
-  Grid
 } from '@mui/material';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
-import { aiService } from '../services/ai';
+import { uploadScan } from '../services/ai';
 
-interface ScanUploaderProps {
+interface Props {
   patientId: string;
-  onScanUploaded?: (scanId: string) => void;
+  onScanUploaded: (scanId: string) => void;
 }
 
-export const ScanUploader: React.FC<ScanUploaderProps> = ({ patientId, onScanUploaded }) => {
-  const [uploading, setUploading] = useState(false);
+export const ScanUploader: React.FC<Props> = ({ patientId, onScanUploaded }) => {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
-  const [apiAvailable, setApiAvailable] = useState<boolean>(true);
 
-  // Check if API is available when component mounts
-  React.useEffect(() => {
-    const checkApiAvailability = async () => {
-      try {
-        await axios.get('http://localhost:3001/api/health', { timeout: 2000 });
-        setApiAvailable(true);
-      } catch (err) {
-        console.log('API not available, using demo mode');
-        setApiAvailable(false);
-      }
-    };
-    
-    checkApiAvailability();
+  const onDrop = useCallback((accepted: File[]) => {
+    setError(null);
+    const selected = accepted[0];
+    if (!selected) return;
+    setFile(selected);
+    const reader = new FileReader();
+    reader.onload = (e) => setPreview((e.target?.result as string) || null);
+    reader.readAsDataURL(selected);
   }, []);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setError(null);
-    setSuccess(null);
-    
-    if (e.target.files && e.target.files[0]) {
-      const selectedFile = e.target.files[0];
-      setFile(selectedFile);
-      
-      // Create a preview
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        if (event.target) {
-          setPreview(event.target.result as string);
-        }
-      };
-      reader.readAsDataURL(selectedFile);
-    }
-  };
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop,
+    accept: { 'image/*': ['.jpg', '.jpeg', '.png', '.webp'] },
+    multiple: false,
+    maxSize: 15 * 1024 * 1024,
+  });
 
   const handleUpload = async () => {
     if (!file) return;
-    
     setUploading(true);
     setError(null);
-    setSuccess(null);
-    
     try {
-      // If API is not available, fallback to demo mode
-      if (!apiAvailable) {
-        console.log('API not available, using demo scan upload');
-        await simulateDemoUpload();
-        return;
-      }
-      
-      console.log(`Uploading scan for patient ${patientId}`);
-      
-      // Create form data
-      const formData = new FormData();
-      formData.append('scan', file);
-      formData.append('patientId', patientId);
-      
-      // Use ai service for real uploads
-      const result = await aiService.uploadScan(file, patientId);
-      console.log('Upload result:', result);
-      
-      if (result && result.scanId) {
-        setSuccess('Scan uploaded successfully');
-        
-        // Notify parent of new scan
-        if (onScanUploaded) {
-          onScanUploaded(result.scanId);
-        }
-      } else {
-        throw new Error('Upload failed: No scan ID returned');
-      }
+      const resp = await uploadScan(file, patientId, 'xray');
+      if (!resp.scanId) throw new Error('Upload failed');
+      onScanUploaded(resp.scanId);
     } catch (err: any) {
-      console.error('Upload error:', err);
-      setError(err.message || 'Failed to upload scan');
-      
-      // If real upload failed, don't automatically fallback to demo mode
-      // Let the user decide whether to use a demo scan
+      setError(err?.message || 'Upload failed. Make sure the server is running.');
     } finally {
       setUploading(false);
-    }
-  };
-
-  const handleDemoScan = async () => {
-    setUploading(true);
-    setError(null);
-    setSuccess(null);
-    
-    try {
-      await simulateDemoUpload();
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  // Simulate a demo upload for testing
-  const simulateDemoUpload = async () => {
-    console.log('Using demo scan for testing');
-    
-    // Simulate network delay
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    // Create a demo scan ID with timestamp to ensure uniqueness
-    const demoScanId = `demo-scan-${Date.now()}`;
-    setSuccess('Demo scan loaded successfully');
-    
-    // Notify parent of new scan
-    if (onScanUploaded) {
-      onScanUploaded(demoScanId);
     }
   };
 
   return (
-    <Card>
+    <Card variant="outlined" sx={{ borderRadius: 3 }}>
       <CardContent>
-        {!apiAvailable && (
-          <Alert severity="warning" sx={{ mb: 2 }}>
-            API server is not available. Operating in demo mode.
-          </Alert>
-        )}
-        
         {error && (
           <Alert severity="error" sx={{ mb: 2 }}>
             {error}
           </Alert>
         )}
-        
-        {success && (
-          <Alert severity="success" sx={{ mb: 2 }}>
-            {success}
-          </Alert>
-        )}
-        
-        <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 2 }}>
-          <Box sx={{ flex: 1 }}>
-            <Box 
-              sx={{ 
-                border: '2px dashed #ccc',
-                borderRadius: 2,
-                p: 3,
-                textAlign: 'center',
-                minHeight: 200,
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'center',
-                alignItems: 'center'
-              }}
-              component="label"
-            >
-              <input
-                type="file"
-                accept="image/*"
-                style={{ display: 'none' }}
-                onChange={handleFileChange}
-                disabled={uploading}
-              />
-              <CloudUploadIcon sx={{ fontSize: 60, color: 'primary.main', mb: 2 }} />
-              <Typography variant="h6" gutterBottom>
-                {file ? file.name : 'Select Dental Scan'}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Click to browse or drag and drop
-              </Typography>
-            </Box>
-            
-            <Box sx={{ mt: 2, display: 'flex', gap: 2 }}>
-              <Button 
-                variant="contained" 
-                color="primary" 
-                fullWidth
-                onClick={handleUpload}
-                disabled={!file || uploading}
-                startIcon={uploading ? <CircularProgress size={20} color="inherit" /> : undefined}
-              >
-                {uploading ? 'Uploading...' : 'Upload Scan'}
-              </Button>
-              
-              <Button 
-                variant="outlined"
-                color="secondary"
-                fullWidth
-                onClick={handleDemoScan}
-                disabled={uploading}
-              >
-                Use Demo Scan
-              </Button>
-            </Box>
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2 }}>
+          <Box
+            {...getRootProps()}
+            sx={{
+              border: '2px dashed',
+              borderColor: isDragActive ? 'primary.main' : 'divider',
+              bgcolor: isDragActive ? 'primary.50' : 'background.default',
+              borderRadius: 3,
+              minHeight: 260,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              p: 3,
+              textAlign: 'center',
+              cursor: 'pointer',
+              transition: 'all 150ms',
+            }}
+          >
+            <input {...getInputProps()} />
+            <CloudUploadIcon sx={{ fontSize: 56, color: 'primary.main', mb: 1 }} />
+            <Typography variant="h6">
+              {file ? file.name : 'Drop a dental scan here'}
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              JPG, PNG, or WEBP · up to 15 MB
+            </Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ mt: 1 }}>
+              X-ray, panoramic, or intraoral photo
+            </Typography>
           </Box>
-          
-          <Box sx={{ flex: 1 }}>
-            <Paper elevation={2} sx={{ p: 2, height: '100%', minHeight: 200 }}>
-              <Typography variant="h6" gutterBottom>
-                Preview
+
+          <Box
+            sx={{
+              border: '1px solid',
+              borderColor: 'divider',
+              borderRadius: 3,
+              minHeight: 260,
+              bgcolor: '#0b1220',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              overflow: 'hidden',
+            }}
+          >
+            {preview ? (
+              <img
+                src={preview}
+                alt="preview"
+                style={{ maxWidth: '100%', maxHeight: 260, display: 'block' }}
+              />
+            ) : (
+              <Typography variant="body2" sx={{ color: '#64748b' }}>
+                Preview appears here
               </Typography>
-              {preview ? (
-                <Box 
-                  component="img"
-                  src={preview}
-                  alt="Scan preview"
-                  sx={{ 
-                    width: '100%',
-                    height: 'auto',
-                    maxHeight: 300,
-                    objectFit: 'contain'
-                  }}
-                />
-              ) : (
-                <Box 
-                  sx={{ 
-                    height: 200,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center'
-                  }}
-                >
-                  <Typography variant="body2" color="text.secondary">
-                    No image selected
-                  </Typography>
-                </Box>
-              )}
-            </Paper>
+            )}
           </Box>
         </Box>
+
+        <Stack direction="row" justifyContent="flex-end" sx={{ mt: 2 }}>
+          <Button
+            variant="contained"
+            disabled={!file || uploading}
+            onClick={handleUpload}
+            startIcon={uploading ? <CircularProgress size={16} color="inherit" /> : undefined}
+          >
+            {uploading ? 'Uploading & analyzing…' : 'Upload & analyze'}
+          </Button>
+        </Stack>
       </CardContent>
     </Card>
   );
-}; 
+};
+
+export default ScanUploader;

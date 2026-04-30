@@ -1,149 +1,208 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useDropzone } from 'react-dropzone';
+import {
+  Alert,
+  Box,
+  Card,
+  CardContent,
+  Chip,
+  CircularProgress,
+  MenuItem,
+  Stack,
+  TextField,
+  Typography,
+} from '@mui/material';
 import { scans } from '../services/scans';
+import { patients as patientsApi } from '../services/api';
 import AIAnalysis from '../components/AIAnalysis';
+import { scanImageUrl } from '../services/ai';
 
 const Scans: React.FC = () => {
   const [selectedPatientId, setSelectedPatientId] = useState('');
   const [selectedScanId, setSelectedScanId] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const queryClient = useQueryClient();
+  const qc = useQueryClient();
 
-  const { data: patients = [], isLoading: isLoadingPatients } = useQuery({
+  const { data: patients = [] } = useQuery({
     queryKey: ['patients'],
-    queryFn: async () => {
-      const response = await fetch('http://localhost:3001/api/patients');
-      if (!response.ok) {
-        throw new Error('Failed to fetch patients');
-      }
-      return response.json();
-    },
+    queryFn: patientsApi.getAll,
+    retry: 0,
   });
 
-  const { data: scansList = [], isLoading: isLoadingScans } = useQuery({
+  const { data: scansList = [], isLoading: loadingScans } = useQuery({
     queryKey: ['scans', selectedPatientId],
-    queryFn: () => selectedPatientId ? scans.getAll(selectedPatientId) : [],
+    queryFn: () => (selectedPatientId ? scans.getAll(selectedPatientId) : Promise.resolve([])),
     enabled: !!selectedPatientId,
   });
 
   const uploadMutation = useMutation({
     mutationFn: (file: File) => scans.upload(selectedPatientId, file),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['scans', selectedPatientId] });
+      qc.invalidateQueries({ queryKey: ['scans', selectedPatientId] });
       setUploadError(null);
     },
-    onError: (error: any) => {
-      setUploadError(error.message || 'Failed to upload scan');
-    },
+    onError: (err: any) => setUploadError(err?.message || 'Upload failed'),
   });
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    onDrop: (acceptedFiles) => {
-      if (acceptedFiles.length > 0) {
-        const file = acceptedFiles[0];
-        if (file.size > 10 * 1024 * 1024) { // 10MB limit
-          setUploadError('File size must be less than 10MB');
-          return;
-        }
-        uploadMutation.mutate(file);
+    onDrop: (files) => {
+      if (!selectedPatientId) {
+        setUploadError('Select a patient first');
+        return;
       }
+      const f = files[0];
+      if (!f) return;
+      if (f.size > 15 * 1024 * 1024) {
+        setUploadError('File must be under 15 MB');
+        return;
+      }
+      uploadMutation.mutate(f);
     },
-    accept: {
-      'image/*': ['.png', '.jpg', '.jpeg', '.dicom']
-    }
+    accept: { 'image/*': ['.png', '.jpg', '.jpeg', '.webp'] },
+    multiple: false,
   });
 
-  if (isLoadingPatients) {
-    return <div className="text-center py-4">Loading patients...</div>;
-  }
-
   return (
-    <div className="container mx-auto px-4 py-8">
-      <h1 className="text-2xl font-bold mb-6">Dental Scans</h1>
+    <Box>
+      <Typography variant="h4" fontWeight={800} sx={{ mb: 1 }}>
+        Scans
+      </Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+        Upload dental scans and review AI analysis.
+      </Typography>
 
-      <div className="mb-8">
-        <label className="block text-sm font-medium text-gray-700 mb-2">
-          Select Patient
-        </label>
-        <select
-          value={selectedPatientId}
-          onChange={(e) => setSelectedPatientId(e.target.value)}
-          className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-        >
-          <option value="">Select a patient</option>
-          {Array.isArray(patients) && patients.map((patient: any) => (
-            <option key={patient._id} value={patient._id}>
-              {patient.name}
-            </option>
-          ))}
-        </select>
-      </div>
+      <Card variant="outlined" sx={{ borderRadius: 3, mb: 3 }}>
+        <CardContent>
+          <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems="stretch">
+            <TextField
+              select
+              label="Patient"
+              fullWidth
+              value={selectedPatientId}
+              onChange={(e) => {
+                setSelectedPatientId(e.target.value);
+                setSelectedScanId(null);
+              }}
+              sx={{ maxWidth: { md: 320 } }}
+            >
+              <MenuItem value="">Select a patient</MenuItem>
+              {patients.map((p: any) => (
+                <MenuItem key={p.id} value={p.id}>
+                  {p.name || p.fullName || p.id}
+                </MenuItem>
+              ))}
+            </TextField>
+
+            <Box
+              {...getRootProps()}
+              sx={{
+                flex: 1,
+                border: '2px dashed',
+                borderColor: isDragActive ? 'primary.main' : 'divider',
+                bgcolor: isDragActive ? 'primary.50' : 'background.default',
+                borderRadius: 2,
+                p: 3,
+                textAlign: 'center',
+                cursor: 'pointer',
+                minHeight: 96,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <input {...getInputProps()} />
+              <Typography variant="body2" color="text.secondary">
+                {uploadMutation.isPending
+                  ? 'Uploading…'
+                  : isDragActive
+                  ? 'Drop the scan here'
+                  : 'Drag & drop a scan or click to browse'}
+              </Typography>
+            </Box>
+          </Stack>
+          {uploadError && (
+            <Alert severity="error" sx={{ mt: 2 }}>
+              {uploadError}
+            </Alert>
+          )}
+        </CardContent>
+      </Card>
 
       {selectedPatientId && (
-        <div className="mb-8">
-          <div
-            {...getRootProps()}
-            className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer
-              ${isDragActive ? 'border-blue-500 bg-blue-50' : 'border-gray-300'}`}
-          >
-            <input {...getInputProps()} />
-            {isDragActive ? (
-              <p className="text-blue-500">Drop the scan here...</p>
-            ) : (
-              <p className="text-gray-600">Drag and drop a scan here, or click to select</p>
-            )}
-          </div>
-          {uploadError && (
-            <p className="mt-2 text-sm text-red-600">{uploadError}</p>
-          )}
-          {uploadMutation.isPending && (
-            <p className="mt-2 text-sm text-blue-600">Uploading scan...</p>
-          )}
-        </div>
-      )}
-
-      {isLoadingScans ? (
-        <div className="text-center py-4">Loading scans...</div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {Array.isArray(scansList) && scansList.map((scan: any) => (
-            <div
-              key={scan._id}
-              className="bg-white shadow rounded-lg p-6 cursor-pointer hover:shadow-md transition-shadow"
-              onClick={() => setSelectedScanId(scan._id)}
+        <>
+          {loadingScans ? (
+            <Stack direction="row" spacing={1} alignItems="center">
+              <CircularProgress size={16} />
+              <Typography variant="body2">Loading scans…</Typography>
+            </Stack>
+          ) : scansList.length === 0 ? (
+            <Typography variant="body2" color="text.secondary">
+              No scans for this patient yet.
+            </Typography>
+          ) : (
+            <Box
+              sx={{
+                display: 'grid',
+                gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', lg: 'repeat(3, 1fr)' },
+                gap: 2,
+              }}
             >
-              <div className="aspect-w-16 aspect-h-9 mb-4">
-                <img
-                  src={`http://localhost:3001/api/scans/${scan._id}/image`}
-                  alt="Dental scan"
-                  className="object-cover rounded-lg"
-                />
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-sm text-gray-500">
-                  {new Date(scan.createdAt).toLocaleDateString()}
-                </span>
-                <span className={`px-2 py-1 rounded-full text-xs ${
-                  scan.status === 'analyzed' ? 'bg-green-100 text-green-800' :
-                  scan.status === 'processing' ? 'bg-yellow-100 text-yellow-800' :
-                  'bg-gray-100 text-gray-800'
-                }`}>
-                  {scan.status}
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+              {scansList.map((scan: any) => {
+                const isSelected = selectedScanId === scan.id;
+                return (
+                  <Card
+                    key={scan.id}
+                    variant="outlined"
+                    onClick={() => setSelectedScanId(scan.id)}
+                    sx={{
+                      cursor: 'pointer',
+                      borderRadius: 3,
+                      borderColor: isSelected ? 'primary.main' : 'divider',
+                      transition: 'all 120ms',
+                      '&:hover': { borderColor: 'primary.light' },
+                    }}
+                  >
+                    <Box sx={{ aspectRatio: '16/10', overflow: 'hidden', bgcolor: '#0b1220' }}>
+                      <img
+                        src={scanImageUrl(scan.id)}
+                        alt="scan"
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      />
+                    </Box>
+                    <CardContent sx={{ pt: 1.5, pb: '12px !important' }}>
+                      <Stack direction="row" justifyContent="space-between" alignItems="center">
+                        <Typography variant="caption" color="text.secondary">
+                          {new Date(scan.createdAt).toLocaleString()}
+                        </Typography>
+                        <Chip
+                          size="small"
+                          label={scan.status || 'uploaded'}
+                          color={
+                            scan.status === 'analyzed'
+                              ? 'success'
+                              : scan.status === 'failed'
+                              ? 'error'
+                              : 'default'
+                          }
+                        />
+                      </Stack>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </Box>
+          )}
 
-      {selectedScanId && (
-        <div className="mt-8">
-          <AIAnalysis scanId={selectedScanId} />
-        </div>
+          {selectedScanId && (
+            <Box sx={{ mt: 3 }}>
+              <AIAnalysis scanId={selectedScanId} patientId={selectedPatientId} />
+            </Box>
+          )}
+        </>
       )}
-    </div>
+    </Box>
   );
 };
 
-export default Scans; 
+export default Scans;

@@ -8,7 +8,7 @@ import ChatAssistant from '../components/ChatAssistant';
 import { TreatmentPlan } from '../components/TreatmentPlan';
 
 interface Patient {
-  _id: string;
+  id: string;
   name: string;
   email: string;
   phone: string;
@@ -16,11 +16,11 @@ interface Patient {
 }
 
 interface Scan {
-  _id: string;
   id: string;
   patientId: string;
   createdAt: string;
-  filename: string;
+  fileName?: string;
+  status?: string;
 }
 
 const PatientDetails = () => {
@@ -174,13 +174,13 @@ const PatientDetails = () => {
             <Box display="grid" gridTemplateColumns={{ xs: '1fr', sm: '1fr 1fr', md: '1fr 1fr 1fr' }} gap={2}>
               {scans.map(scan => (
                 <Card 
-                  key={scan._id || scan.id} 
+                  key={scan.id} 
                   variant="outlined" 
                   sx={{ 
                     cursor: 'pointer',
-                    border: selectedScanId === (scan._id || scan.id) ? '2px solid #1976d2' : undefined
+                    border: selectedScanId === (scan.id) ? '2px solid #1976d2' : undefined
                   }}
-                  onClick={() => handleScanSelect(scan._id || scan.id)}
+                  onClick={() => handleScanSelect(scan.id)}
                 >
                   <CardContent>
                     <Typography variant="body2" color="text.secondary">
@@ -188,7 +188,7 @@ const PatientDetails = () => {
                     </Typography>
                     <Box sx={{ mt: 2, textAlign: 'center' }}>
                       <img 
-                        src={`http://localhost:3001/api/scans/${scan._id || scan.id}/image`}
+                        src={`http://localhost:3001/api/scans/${scan.id}/image`}
                         alt="Dental scan" 
                         style={{ maxHeight: 150, maxWidth: '100%', objectFit: 'contain' }}
                         onError={(e) => {
@@ -203,7 +203,7 @@ const PatientDetails = () => {
                       sx={{ mt: 2 }}
                       onClick={(e) => {
                         e.stopPropagation();
-                        handleScanSelect(scan._id || scan.id);
+                        handleScanSelect(scan.id);
                       }}
                     >
                       Analyze
@@ -218,7 +218,7 @@ const PatientDetails = () => {
         {/* Analysis Tab */}
         <Box sx={{ py: 3 }} hidden={activeTab !== 1}>
           {selectedScanId ? (
-            <AIAnalysis scanId={selectedScanId} patientId={id} />
+            <AIAnalysis scanId={selectedScanId} patientId={id!} />
           ) : (
             <Alert severity="info">
               Please select a scan first to view AI analysis.
@@ -229,7 +229,7 @@ const PatientDetails = () => {
         {/* Treatment Plan Tab */}
         <Box sx={{ py: 3 }} hidden={activeTab !== 2}>
           {selectedScanId ? (
-            <TreatmentPlan patientId={id!} />
+            <TreatmentPlan patientId={id!} scanId={selectedScanId} />
           ) : (
             <Alert severity="info">
               Please select a scan first to view treatment plan.

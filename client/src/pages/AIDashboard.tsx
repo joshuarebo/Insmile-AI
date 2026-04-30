@@ -1,191 +1,104 @@
-import React, { useState, useEffect } from 'react';
-import { Box, Card, CardContent, Typography, Tab, Tabs, Button, Alert, Chip } from '@mui/material';
-import { ScanUploader } from '../components/ScanUploader';
+import React, { useEffect, useState } from 'react';
+import {
+  Alert,
+  Box,
+  Card,
+  CardContent,
+  Chip,
+  Stack,
+  Tab,
+  Tabs,
+  Typography,
+} from '@mui/material';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import ScanUploader from '../components/ScanUploader';
 import AIAnalysis from '../components/AIAnalysis';
 import { TreatmentPlan } from '../components/TreatmentPlan';
 import ChatAssistant from '../components/ChatAssistant';
-import axios from 'axios';
-import { ai } from '../services/ai';
+import { getHealth, HealthStatus } from '../services/ai';
 
-/**
- * AIDashboard - A standalone page to test all AI features
- * No patient selection needed, works with demo mode by default
- */
+const DEMO_PATIENT = 'demo-patient';
+
 const AIDashboard: React.FC = () => {
-  const [activeTab, setActiveTab] = useState(0);
-  const [currentScanId, setCurrentScanId] = useState<string | null>(null);
-  const [apiAvailable, setApiAvailable] = useState<boolean | null>(null);
-  const [realTimeAvailable, setRealTimeAvailable] = useState<boolean | null>(null);
-  
-  // Fixed demo patient ID for all components
-  const demoPatientId = 'demo-patient-123';
+  const [tab, setTab] = useState(0);
+  const [scanId, setScanId] = useState<string | null>(null);
+  const [health, setHealth] = useState<HealthStatus | null>(null);
 
   useEffect(() => {
-    // Check API availability
-    const checkApiAvailability = async () => {
-      try {
-        const available = await axios.get('http://localhost:3001/api/health', { timeout: 2000 })
-          .then(() => true)
-          .catch(() => false);
-        
-        setApiAvailable(available);
-        
-        // If API is available, check if real-time analysis is available
-        if (available) {
-          const realTime = await ai.isRealTimeAvailable();
-          setRealTimeAvailable(realTime);
-          console.log(`Real-time analysis ${realTime ? 'is' : 'is not'} available`);
-        } else {
-          setRealTimeAvailable(false);
-        }
-      } catch (err) {
-        console.log('Error checking API availability:', err);
-        setApiAvailable(false);
-        setRealTimeAvailable(false);
-      }
-    };
-    
-    checkApiAvailability();
-
-    // Set up periodic API check every 30 seconds
-    const intervalId = setInterval(checkApiAvailability, 30000);
-    
-    return () => clearInterval(intervalId);
+    const check = async () => setHealth(await getHealth());
+    check();
+    const id = setInterval(check, 30000);
+    return () => clearInterval(id);
   }, []);
 
-  const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
-    setActiveTab(newValue);
-    
-    // If user switches to Analysis or Treatment tab and no scan is selected,
-    // automatically generate a demo scan
-    if ((newValue === 1 || newValue === 2) && !currentScanId) {
-      handleDemoScan();
-    }
+  const handleUploaded = (id: string) => {
+    setScanId(id);
+    setTab(1);
   };
 
-  const handleScanUploaded = (scanId: string) => {
-    setCurrentScanId(scanId);
-    // Automatically switch to Analysis tab after upload
-    setActiveTab(1);
-  };
-
-  // Force demo mode for scan upload
-  const handleDemoScan = () => {
-    const demoScanId = 'demo-scan-' + Date.now();
-    setCurrentScanId(demoScanId);
-    setActiveTab(1);
-  };
+  const aiReady = health && health.aiAvailable;
 
   return (
-    <Box p={3}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h4" gutterBottom>
-          Dental AI Dashboard
-        </Typography>
-        
-        <Box sx={{ display: 'flex', gap: 2 }}>
-          <Chip 
-            label={apiAvailable === null ? 'Checking connection...' : 
-                  apiAvailable ? 'API connected' : 'API unavailable'}
-            color={apiAvailable === null ? 'default' : 
-                  apiAvailable ? 'success' : 'error'}
+    <Box>
+      <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} sx={{ mb: 3 }}>
+        <Box>
+          <Stack direction="row" spacing={1.5} alignItems="center">
+            <AutoAwesomeIcon color="primary" />
+            <Typography variant="h5" fontWeight={700}>
+              Dental AI workspace
+            </Typography>
+          </Stack>
+          <Typography variant="body2" color="text.secondary">
+            Upload a scan, review AI findings, generate a Kenya-priced treatment plan, and chat with the assistant.
+          </Typography>
+        </Box>
+        <Stack direction="row" spacing={1}>
+          <Chip
+            label={health ? (aiReady ? 'AI ready' : 'AI offline') : 'checking…'}
+            color={health ? (aiReady ? 'success' : 'error') : 'default'}
             variant="outlined"
           />
-          
-          {apiAvailable && (
-            <Chip 
-              label={realTimeAvailable === null ? 'Checking Bedrock...' : 
-                    realTimeAvailable ? 'Real-time mode' : 'Demo mode'}
-              color={realTimeAvailable === null ? 'default' : 
-                    realTimeAvailable ? 'success' : 'warning'}
-              variant="outlined"
-            />
+          {health?.models?.vision && (
+            <Chip size="small" variant="outlined" label={`vision: ${health.models.vision.split('/').pop()}`} />
           )}
-        </Box>
-      </Box>
-      
-      <Alert severity={apiAvailable ? (realTimeAvailable ? 'success' : 'warning') : 'error'} sx={{ mb: 3 }}>
-        {!apiAvailable 
-          ? 'Server connection not available. Running in demo mode with mock data.'
-          : realTimeAvailable 
-            ? 'Connected to Bedrock AI services. Uploads and analysis will be processed in real-time.'
-            : <>
-                Running in demo mode. To enable real-time processing:
-                <ol style={{ margin: '8px 0 0 20px', padding: 0 }}>
-                  <li>Edit <code>server/config/aws.json</code></li>
-                  <li>Add your AWS access key and secret key</li>
-                  <li>Restart the server</li>
-                </ol>
-              </>
-        }
-      </Alert>
-      
-      <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
-        <Tabs value={activeTab} onChange={handleTabChange}>
-          <Tab label="Upload Scan" />
-          <Tab label="AI Analysis" />
-          <Tab label="Treatment Plan" />
-          <Tab label="Chat Assistant" />
+          {health?.models?.text && (
+            <Chip size="small" variant="outlined" label={`text: ${health.models.text.split('/').pop()}`} />
+          )}
+        </Stack>
+      </Stack>
+
+      {!aiReady && health && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          The server is up but OpenRouter is not configured. Add{' '}
+          <code>OPENROUTER_API_KEY</code> to <code>server/.env</code> and restart.
+        </Alert>
+      )}
+
+      <Card variant="outlined" sx={{ borderRadius: 3, mb: 2 }}>
+        <Tabs
+          value={tab}
+          onChange={(_, v) => setTab(v)}
+          sx={{ px: 2, borderBottom: 1, borderColor: 'divider' }}
+        >
+          <Tab label="1 · Upload" />
+          <Tab label="2 · Analysis" disabled={!scanId} />
+          <Tab label="3 · Treatment plan" disabled={!scanId} />
+          <Tab label="4 · Chat" />
         </Tabs>
-      </Box>
-      
-      {/* Upload Scan Tab */}
-      <Box sx={{ display: activeTab === 0 ? 'block' : 'none' }}>
-        <Typography variant="h6" gutterBottom>
-          Upload a dental scan for AI analysis
-        </Typography>
-        <ScanUploader patientId={demoPatientId} onScanUploaded={handleScanUploaded} />
-        
-        <Box textAlign="center" mt={4}>
-          <Typography variant="body2" color="text.secondary" gutterBottom>
-            Don't have a scan to upload? Use our demo scan:
-          </Typography>
-          <Button 
-            variant="contained" 
-            color="primary" 
-            onClick={handleDemoScan}
-          >
-            Use Demo Scan
-          </Button>
-        </Box>
-      </Box>
-      
-      {/* AI Analysis Tab */}
-      <Box sx={{ display: activeTab === 1 ? 'block' : 'none' }}>
-        {currentScanId ? (
-          <AIAnalysis scanId={currentScanId} patientId={demoPatientId} />
-        ) : (
-          <Card>
-            <CardContent>
-              <Alert severity="warning">
-                Please upload or select a scan first to view AI analysis.
-              </Alert>
-            </CardContent>
-          </Card>
-        )}
-      </Box>
-      
-      {/* Treatment Plan Tab */}
-      <Box sx={{ display: activeTab === 2 ? 'block' : 'none' }}>
-        {currentScanId ? (
-          <TreatmentPlan patientId={demoPatientId} scanId={currentScanId} />
-        ) : (
-          <Card>
-            <CardContent>
-              <Alert severity="warning">
-                Please upload or select a scan first to generate a treatment plan.
-              </Alert>
-            </CardContent>
-          </Card>
-        )}
-      </Box>
-      
-      {/* Chat Assistant Tab */}
-      <Box sx={{ display: activeTab === 3 ? 'block' : 'none' }}>
-        <ChatAssistant patientId={demoPatientId} />
-      </Box>
+      </Card>
+
+      {tab === 0 && (
+        <ScanUploader patientId={DEMO_PATIENT} onScanUploaded={handleUploaded} />
+      )}
+      {tab === 1 && scanId && (
+        <AIAnalysis scanId={scanId} patientId={DEMO_PATIENT} />
+      )}
+      {tab === 2 && scanId && (
+        <TreatmentPlan patientId={DEMO_PATIENT} scanId={scanId} />
+      )}
+      {tab === 3 && <ChatAssistant patientId={DEMO_PATIENT} />}
     </Box>
   );
 };
 
-export default AIDashboard; 
+export default AIDashboard;

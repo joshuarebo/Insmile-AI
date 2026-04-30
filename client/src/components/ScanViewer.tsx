@@ -1,191 +1,183 @@
-import React, { useState, useEffect, useRef } from 'react';
-import axios from 'axios';
-import { Box, Typography, CircularProgress } from '@mui/material';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Box, Typography, Chip, Stack, CircularProgress, ToggleButton, ToggleButtonGroup } from '@mui/material';
+import { Finding, scanImageUrl } from '../services/ai';
 
 interface ScanViewerProps {
   scanId: string;
-  findings?: Array<{
-    label: string;
-    confidence: number;
-    severity: 'normal' | 'mild' | 'severe';
-    bbox?: [number, number, number, number];
-  }>;
-  highlightFindings?: boolean;
+  findings?: Finding[];
+  selectedIndex?: number | null;
+  onSelectFinding?: (index: number | null) => void;
 }
 
-// Default dental scan placeholder - professionally marked dental X-ray with analysis indicators
-const DEFAULT_IMAGE = 'http://localhost:3001/api/public/dental-marked.jpg';
+const SEVERITY_COLOR: Record<string, string> = {
+  severe: '#dc2626',
+  moderate: '#ea580c',
+  mild: '#16a34a',
+};
 
-export const ScanViewer: React.FC<ScanViewerProps> = ({ 
-  scanId, 
-  findings = [], 
-  highlightFindings = true 
+type SeverityFilter = 'all' | 'severe' | 'moderate' | 'mild';
+
+export const ScanViewer: React.FC<ScanViewerProps> = ({
+  scanId,
+  findings = [],
+  selectedIndex = null,
+  onSelectFinding,
 }) => {
-  const [imageSrc, setImageSrc] = useState<string>('');
-  const [loading, setLoading] = useState<boolean>(true);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [imageDims, setImageDims] = useState<{ w: number; h: number } | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  
-  // Load scan image
+  const [filter, setFilter] = useState<SeverityFilter>('all');
+  const containerRef = useRef<HTMLDivElement>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
+
   useEffect(() => {
-    const fetchImage = async () => {
-      setLoading(true);
-      setError(null);
-      
-      // Handle demo scans
-      if (scanId.startsWith('demo-scan-')) {
-        setImageSrc(DEFAULT_IMAGE);
-        setLoading(false);
-        return;
-      }
-      
-      try {
-        // Attempt to get the actual image from the server
-        const response = await axios.get(`http://localhost:3001/api/scans/${scanId}/image`, {
-          responseType: 'blob'
-        });
-        
-        const imageUrl = URL.createObjectURL(response.data);
-        setImageSrc(imageUrl);
-      } catch (error) {
-        console.warn('Error loading scan image, using placeholder:', error);
-        // Fallback to a placeholder
-        setImageSrc(DEFAULT_IMAGE);
-      } finally {
-        setLoading(false);
-      }
-    };
-    
-    if (scanId) {
-      fetchImage();
-    } else {
-      // Default placeholder if no scanId is provided
-      setImageSrc(DEFAULT_IMAGE);
+    setLoading(true);
+    setError(null);
+    if (!scanId) {
+      setImageUrl(null);
       setLoading(false);
+      return;
     }
+    setImageUrl(scanImageUrl(scanId));
   }, [scanId]);
-  
-  // Draw bounding boxes for findings
-  useEffect(() => {
-    if (
-      !loading && 
-      imageSrc && 
-      canvasRef.current && 
-      findings.length > 0 && 
-      highlightFindings
-    ) {
-      const canvas = canvasRef.current;
-      const ctx = canvas.getContext('2d');
-      
-      if (!ctx) return;
-      
-      const img = new Image();
-      img.src = imageSrc;
-      
-      img.onload = () => {
-        // Set canvas dimensions to match the image
-        canvas.width = img.width;
-        canvas.height = img.height;
-        
-        // Draw the image
-        ctx.drawImage(img, 0, 0, img.width, img.height);
-        
-        // Draw bounding boxes for findings
-        findings.forEach(finding => {
-          if (finding.bbox) {
-            const [x, y, width, height] = finding.bbox;
-            
-            // Set style based on severity
-            let strokeColor;
-            switch (finding.severity) {
-              case 'severe':
-                strokeColor = 'rgba(255, 0, 0, 0.8)'; // Red for severe
-                break;
-              case 'mild':
-                strokeColor = 'rgba(255, 165, 0, 0.8)'; // Orange for mild
-                break;
-              default:
-                strokeColor = 'rgba(0, 128, 0, 0.8)'; // Green for normal
-            }
-            
-            // Draw rectangle
-            ctx.lineWidth = 3;
-            ctx.strokeStyle = strokeColor;
-            ctx.beginPath();
-            ctx.rect(x, y, width, height);
-            ctx.stroke();
-            
-            // Draw label background
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-            ctx.fillRect(x, y - 20, ctx.measureText(finding.label).width + 10, 20);
-            
-            // Draw label text
-            ctx.fillStyle = 'white';
-            ctx.font = '12px Arial';
-            ctx.fillText(finding.label, x + 5, y - 5);
-          }
-        });
-      };
-    }
-  }, [imageSrc, findings, loading, highlightFindings]);
-  
-  if (loading) {
-    return (
-      <Box display="flex" justifyContent="center" alignItems="center" height="200px" bgcolor="#f5f5f5" borderRadius={1}>
-        <CircularProgress />
-      </Box>
-    );
-  }
-  
-  if (error) {
-    return (
-      <Box display="flex" justifyContent="center" alignItems="center" height="200px" bgcolor="#f5f5f5" borderRadius={1}>
-        <Typography color="error">{error}</Typography>
-      </Box>
-    );
-  }
-  
+
+  const handleLoad = () => {
+    const img = imgRef.current;
+    if (img) setImageDims({ w: img.naturalWidth, h: img.naturalHeight });
+    setLoading(false);
+  };
+
+  const handleError = () => {
+    setError('Unable to load scan image. The file may still be uploading or was removed.');
+    setLoading(false);
+  };
+
+  const filtered = useMemo(() => {
+    return findings
+      .map((f, i) => ({ ...f, _i: i }))
+      .filter((f) => (filter === 'all' ? true : f.severity === filter));
+  }, [findings, filter]);
+
   return (
-    <Box position="relative" bgcolor="#f5f5f5" borderRadius={1} overflow="hidden">
-      {/* Display the image directly if no findings or highlighting disabled */}
-      {(!findings.length || !highlightFindings) ? (
-        <img 
-          src={imageSrc} 
-          alt="Dental scan" 
-          style={{ width: '100%', objectFit: 'contain', maxHeight: '400px' }}
-          onError={() => setImageSrc(DEFAULT_IMAGE)}
-        />
-      ) : (
-        <canvas 
-          ref={canvasRef} 
-          style={{ width: '100%', objectFit: 'contain', maxHeight: '400px' }}
-        />
-      )}
-      
-      {/* Legend for highlighted findings */}
-      {highlightFindings && findings.length > 0 && (
-        <Box 
-          position="absolute" 
-          bottom={8} 
-          right={8} 
-          bgcolor="rgba(255,255,255,0.9)" 
-          p={1} 
-          borderRadius={1}
+    <Box>
+      <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1.5 }}>
+        <Stack direction="row" spacing={1} alignItems="center">
+          <Chip size="small" label="Severe" sx={{ bgcolor: SEVERITY_COLOR.severe, color: 'white' }} />
+          <Chip size="small" label="Moderate" sx={{ bgcolor: SEVERITY_COLOR.moderate, color: 'white' }} />
+          <Chip size="small" label="Mild" sx={{ bgcolor: SEVERITY_COLOR.mild, color: 'white' }} />
+        </Stack>
+        <ToggleButtonGroup
+          size="small"
+          value={filter}
+          exclusive
+          onChange={(_, v) => v && setFilter(v)}
         >
-          <Box display="flex" alignItems="center" mb={0.5}>
-            <Box width={12} height={12} mr={1} bgcolor="red" />
-            <Typography variant="caption">Severe</Typography>
+          <ToggleButton value="all">All</ToggleButton>
+          <ToggleButton value="severe">Severe</ToggleButton>
+          <ToggleButton value="moderate">Moderate</ToggleButton>
+          <ToggleButton value="mild">Mild</ToggleButton>
+        </ToggleButtonGroup>
+      </Stack>
+
+      <Box
+        ref={containerRef}
+        sx={{
+          position: 'relative',
+          width: '100%',
+          bgcolor: '#0b1220',
+          borderRadius: 2,
+          overflow: 'hidden',
+          minHeight: 320,
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+        }}
+      >
+        {loading && (
+          <Box sx={{ position: 'absolute', inset: 0, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+            <CircularProgress sx={{ color: 'white' }} />
           </Box>
-          <Box display="flex" alignItems="center" mb={0.5}>
-            <Box width={12} height={12} mr={1} bgcolor="orange" />
-            <Typography variant="caption">Mild</Typography>
+        )}
+        {error && (
+          <Typography color="#f87171" sx={{ p: 3, textAlign: 'center' }}>
+            {error}
+          </Typography>
+        )}
+        {imageUrl && (
+          <Box sx={{ position: 'relative', width: '100%', display: 'flex', justifyContent: 'center' }}>
+            <img
+              ref={imgRef}
+              src={imageUrl}
+              onLoad={handleLoad}
+              onError={handleError}
+              alt="Dental scan"
+              style={{
+                maxWidth: '100%',
+                maxHeight: 520,
+                display: 'block',
+                borderRadius: 6,
+              }}
+            />
+            {imageDims &&
+              filtered.map((f) => {
+                const bbox = f.bbox_norm;
+                if (!bbox) return null;
+                const [x, y, w, h] = bbox;
+                const color = SEVERITY_COLOR[f.severity] || '#6b7280';
+                const isSelected = selectedIndex === f._i;
+                return (
+                  <Box
+                    key={f._i}
+                    onClick={() => onSelectFinding && onSelectFinding(isSelected ? null : f._i)}
+                    sx={{
+                      position: 'absolute',
+                      left: `${x * 100}%`,
+                      top: `${y * 100}%`,
+                      width: `${w * 100}%`,
+                      height: `${h * 100}%`,
+                      border: `2px solid ${color}`,
+                      borderRadius: 1,
+                      boxShadow: isSelected ? `0 0 0 3px ${color}55` : 'none',
+                      transition: 'box-shadow 120ms',
+                      cursor: onSelectFinding ? 'pointer' : 'default',
+                      backgroundColor: isSelected ? `${color}22` : 'transparent',
+                    }}
+                  >
+                    <Box
+                      sx={{
+                        position: 'absolute',
+                        top: '-22px',
+                        left: 0,
+                        bgcolor: color,
+                        color: 'white',
+                        fontSize: 11,
+                        fontWeight: 600,
+                        px: 0.75,
+                        py: 0.25,
+                        borderRadius: '4px 4px 4px 0',
+                        whiteSpace: 'nowrap',
+                        maxWidth: 260,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                      }}
+                    >
+                      {f.tooth ? `#${f.tooth} — ` : ''}
+                      {f.label}
+                    </Box>
+                  </Box>
+                );
+              })}
           </Box>
-          <Box display="flex" alignItems="center">
-            <Box width={12} height={12} mr={1} bgcolor="green" />
-            <Typography variant="caption">Normal</Typography>
-          </Box>
-        </Box>
+        )}
+      </Box>
+      {imageDims && (
+        <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+          {imageDims.w}×{imageDims.h} px · {findings.length} finding{findings.length === 1 ? '' : 's'} detected
+        </Typography>
       )}
     </Box>
   );
-}; 
+};
+
+export default ScanViewer;

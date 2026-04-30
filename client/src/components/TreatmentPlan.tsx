@@ -1,281 +1,78 @@
-import React, { useState, useEffect } from 'react';
-import axios from 'axios';
-import { 
-  Card, CardContent, Paper, Typography, Box, 
-  List, ListItem, ListItemText, Chip, CircularProgress, Alert, Button
+import React, { useEffect, useState } from 'react';
+import {
+  Alert,
+  Box,
+  Button,
+  Card,
+  CardContent,
+  Chip,
+  CircularProgress,
+  Divider,
+  MenuItem,
+  Stack,
+  TextField,
+  Typography,
 } from '@mui/material';
-import { ai } from '../services/ai';
+import ReplayIcon from '@mui/icons-material/Replay';
+import MedicalServicesOutlinedIcon from '@mui/icons-material/MedicalServicesOutlined';
+import { generateTreatmentPlan, TreatmentPlan as TP } from '../services/ai';
 
-// Interface for treatment step
-interface TreatmentStep {
-  step: string;
-  description: string;
-  timeframe: string;
-  severity?: 'severe' | 'moderate' | 'mild';
-}
-
-// Interface for the complete treatment plan
-interface ITreatmentPlan {
-  patientId: string;
-  overview: string;
-  steps: TreatmentStep[];
-  precautions?: string[];
-  alternatives?: string[];
-  estimatedDuration: string;
-  estimatedCost: string;
-  severity: 'low' | 'medium' | 'high';
-  _source: string;
-}
-
-// Mock data for demo mode
-const MOCK_TREATMENT_PLAN: ITreatmentPlan = {
-  patientId: 'demo',
-  overview: 'Treatment plan for multiple dental issues including cavities and early gum disease.',
-  steps: [
-    {
-      step: 'Deep Cleaning',
-      description: 'Professional cleaning to address gum disease and remove plaque buildup.',
-      timeframe: '1-2 weeks'
-    },
-    {
-      step: 'Cavity Filling',
-      description: 'Treat cavity on tooth #14 with composite filling.',
-      timeframe: '2-3 weeks'
-    },
-    {
-      step: 'Follow-up Examination',
-      description: 'Check healing progress and assess gum health.',
-      timeframe: '6 weeks'
-    }
-  ],
-  precautions: [
-    'Avoid hard foods for 24 hours after filling',
-    'Use prescribed mouthwash for gum disease'
-  ],
-  alternatives: [
-    'Porcelain inlay instead of composite filling (higher cost)',
-    'Surgical intervention for gum disease if non-surgical approach fails'
-  ],
-  estimatedDuration: '2-3 months',
-  estimatedCost: '$800-1200',
-  severity: 'medium',
-  _source: 'mock'
-};
-
-interface TreatmentPlanProps {
+interface Props {
   patientId: string;
   scanId?: string;
 }
 
-export const TreatmentPlan: React.FC<TreatmentPlanProps> = ({ patientId, scanId }) => {
+type PricingMode = 'public' | 'private_mid' | 'private_premium';
+
+const PRICING_LABEL: Record<PricingMode, string> = {
+  public: 'Public hospital (SHA)',
+  private_mid: 'Mid-tier private clinic',
+  private_premium: 'Premium private (Nairobi/Mombasa)',
+};
+
+const urgencyColor: Record<string, string> = {
+  urgent: '#dc2626',
+  soon: '#ea580c',
+  routine: '#16a34a',
+};
+
+export const TreatmentPlan: React.FC<Props> = ({ patientId, scanId }) => {
+  const [plan, setPlan] = useState<TP | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [plan, setPlan] = useState<ITreatmentPlan | null>(null);
-  const [demoMode, setDemoMode] = useState(false);
-  const [apiAvailable, setApiAvailable] = useState(true);
-  const [planRequested, setPlanRequested] = useState(false);
+  const [pricing, setPricing] = useState<PricingMode>('private_mid');
 
-  // Check API availability when component mounts
-  useEffect(() => {
-    const checkApiAvailability = async () => {
-      try {
-        await axios.get('http://localhost:3001/api/health', { timeout: 2000 });
-        setApiAvailable(true);
-      } catch (err) {
-        console.log('API not available, using demo mode');
-        setApiAvailable(false);
-        setDemoMode(true);
-        setPlan(MOCK_TREATMENT_PLAN);
-        setLoading(false);
-      }
-    };
-    
-    checkApiAvailability();
-  }, []);
-
-  useEffect(() => {
-    // Reset state when new scan ID is provided
-    if (scanId) {
-      setPlan(null);
-      setPlanRequested(false);
-      setError(null);
-    }
-    
-    // Don't fetch if API is already known to be unavailable
-    if (!apiAvailable) return;
-
-    // Only use demo mode for pure demo scanIds or patientIds
-    const isDemoScan = scanId && scanId.startsWith('demo-scan-');
-    const isDemoPatient = patientId && patientId.startsWith('demo') && !scanId;
-    
-    if (isDemoScan || isDemoPatient) {
-      console.log('Using demo mode for treatment plan');
-      setDemoMode(true);
-      setPlan(MOCK_TREATMENT_PLAN);
-      setLoading(false);
-      return;
-    }
-    
-    // For non-demo mode with no scanId, don't fetch anything
-    if (!scanId && !isDemoPatient) {
-      setLoading(false);
-      return;
-    }
-    
-    const fetchTreatmentPlan = async () => {
-      setLoading(true);
-      setError(null);
-      setPlanRequested(true);
-      
-      try {
-        console.log(`Requesting treatment plan for patient ${patientId}${scanId ? ` and scan ${scanId}` : ''}`);
-        
-        // Check if real-time analysis is available 
-        const isRealTimeAvailable = await ai.isRealTimeAvailable();
-        
-        if (!isRealTimeAvailable) {
-          console.log('Real-time Bedrock analysis unavailable, using demo mode');
-          setDemoMode(true);
-          setPlan(MOCK_TREATMENT_PLAN);
-          setLoading(false);
-          return;
-        }
-        
-        // If we have a scanId, first check if the analysis is completed
-        if (scanId) {
-          // Check analysis status and wait for completion if needed
-          let analysisStatus;
-          let attempts = 0;
-          const maxAttempts = 10; // Try checking 10 times
-          
-          while (attempts < maxAttempts) {
-            try {
-              analysisStatus = await ai.getAnalysisStatus(scanId);
-              console.log(`Analysis status for scan ${scanId}: ${analysisStatus.status}`);
-              
-              if (analysisStatus.status === 'completed') {
-                console.log('Analysis is completed, can proceed with treatment plan');
-                break;
-              } else if (analysisStatus.status === 'failed') {
-                throw new Error('Analysis failed, cannot generate treatment plan');
-              }
-              
-              // If still processing, wait a bit and check again
-              if (analysisStatus.status === 'processing') {
-                console.log('Analysis still processing, waiting...');
-                await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds
-                attempts++;
-              } else {
-                // Unknown status, move on
-                break;
-              }
-            } catch (error) {
-              console.error('Error checking analysis status:', error);
-              break;
-            }
-          }
-          
-          if (attempts >= maxAttempts) {
-            console.log('Timed out waiting for analysis to complete');
-          }
-        }
-        
-        // Request treatment plan from API - pass scanId if available
-        const response = await ai.getTreatmentPlan(patientId, scanId);
-        
-        if (response) {
-          console.log('Treatment plan received:', response);
-          setPlan(response);
-        } else {
-          throw new Error('No treatment plan data received');
-        }
-      } catch (err: any) {
-        console.error('Error fetching treatment plan:', err);
-        setError('Failed to fetch treatment plan. Switching to demo mode...');
-        
-        // Fall back to demo mode on error
-        setTimeout(() => {
-          setDemoMode(true);
-          setPlan(MOCK_TREATMENT_PLAN);
-          setError(null);
-        }, 1500);
-      } finally {
-        setLoading(false);
-      }
-    };
-    
-    if (patientId && !planRequested) {
-      fetchTreatmentPlan();
-    }
-  }, [patientId, apiAvailable, planRequested, scanId]);
-
-  // When a new scan is processed, request a new treatment plan
-  useEffect(() => {
-    if (scanId && !demoMode && apiAvailable) {
-      console.log('New scan detected, requesting updated treatment plan');
-      setPlanRequested(false); // Reset to trigger a new plan request
-    }
-  }, [scanId, demoMode, apiAvailable]);
-  
-  // Helper function to get severity color
-  const getSeverityColor = (severity: string) => {
-    switch (severity) {
-      case 'high':
-        return '#d32f2f'; // red
-      case 'medium':
-        return '#ed6c02'; // orange
-      case 'low':
-        return '#2e7d32'; // green
-      default:
-        return '#1976d2'; // blue (default)
-    }
-  };
-
-  const handleRegeneratePlan = async () => {
-    // If in demo mode or API unavailable, just simulate regeneration
-    if (demoMode || !apiAvailable) {
-      setLoading(true);
-      setTimeout(() => {
-        setLoading(false);
-        // Make a small change to the mock plan to simulate regeneration
-        const updatedPlan = {
-          ...MOCK_TREATMENT_PLAN,
-          overview: MOCK_TREATMENT_PLAN.overview + ' Updated with additional considerations.'
-        };
-        setPlan(updatedPlan);
-      }, 2000);
-      return;
-    }
-    
-    // Otherwise attempt to regenerate through API
+  const fetchPlan = async () => {
     setLoading(true);
+    setError(null);
     try {
-      const response = await ai.getTreatmentPlan(patientId);
-      if (response) {
-        setPlan(response);
-      } else {
-        throw new Error('No treatment plan data received');
-      }
-    } catch (err) {
-      console.error('Error regenerating treatment plan:', err);
-      setError('Failed to regenerate plan. Using previous version.');
-      setTimeout(() => setError(null), 3000);
+      const result = await generateTreatmentPlan(patientId, scanId, pricing);
+      setPlan(result);
+    } catch (err: any) {
+      const msg =
+        err?.response?.data?.error ||
+        err?.response?.data?.message ||
+        err?.message ||
+        'Unable to generate treatment plan. Run a scan analysis first.';
+      setError(msg);
     } finally {
       setLoading(false);
     }
   };
 
+  useEffect(() => {
+    fetchPlan();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [patientId, scanId, pricing]);
+
   if (loading) {
     return (
-      <Card>
+      <Card variant="outlined" sx={{ borderRadius: 3 }}>
         <CardContent>
-          <Box display="flex" justifyContent="center" alignItems="center" height="200px" flexDirection="column">
-            <CircularProgress size={60} thickness={4} sx={{ mb: 2 }} />
-            <Typography>Generating treatment plan...</Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-              This may take up to 30 seconds
-            </Typography>
-          </Box>
+          <Stack direction="row" spacing={2} alignItems="center">
+            <CircularProgress size={20} />
+            <Typography>Composing treatment plan for Kenya…</Typography>
+          </Stack>
         </CardContent>
       </Card>
     );
@@ -283,175 +80,198 @@ export const TreatmentPlan: React.FC<TreatmentPlanProps> = ({ patientId, scanId 
 
   if (error) {
     return (
-      <Card>
+      <Card variant="outlined" sx={{ borderRadius: 3 }}>
         <CardContent>
-          <Alert severity="error" sx={{ mb: 2 }}>
+          <Alert severity="warning" sx={{ mb: 2 }}>
             {error}
           </Alert>
+          <Button onClick={fetchPlan} startIcon={<ReplayIcon />} variant="outlined">
+            Retry
+          </Button>
         </CardContent>
       </Card>
     );
   }
 
-  if (!plan) {
-    return (
-      <Card>
-        <CardContent>
-          <Alert severity="info">
-            No treatment plan is available yet.
-          </Alert>
-        </CardContent>
-      </Card>
-    );
-  }
+  if (!plan) return null;
 
   return (
-    <Card>
+    <Card variant="outlined" sx={{ borderRadius: 3 }}>
       <CardContent>
-        <Typography variant="h6" sx={{ mb: 2 }}>
-          Treatment Plan {demoMode ? "(Demo Mode)" : 
-            (plan._source === 'mock' ? "(Mock Data)" : "")}
-        </Typography>
-
-        {plan._source === 'mock' && (
-          <Alert severity="warning" sx={{ mb: 2 }}>
-            Using mock treatment plan data instead of real-time generation. This is demo data and not based on the uploaded scan.
-          </Alert>
-        )}
-        
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-          <Typography variant="h6">
-            AI-Generated Treatment Plan {demoMode && "(Demo Mode)"}
-          </Typography>
-          
-          <Button 
-            variant="outlined" 
-            size="small"
-            onClick={handleRegeneratePlan}
-            disabled={loading}
-          >
-            Regenerate Plan
-          </Button>
-        </Box>
-        
-        <Box sx={{ display: 'flex', gap: 2, mb: 2, alignItems: 'center' }}>
-          <Typography variant="subtitle1">Overall Severity:</Typography>
-          <Chip 
-            label={(plan.severity || 'medium').toUpperCase()} 
-            sx={{ 
-              bgcolor: getSeverityColor(plan.severity || 'medium'),
-              color: 'white',
-              fontWeight: 'bold'
-            }} 
-          />
-        </Box>
-        
-        <Paper elevation={1} sx={{ p: 2, mb: 3 }}>
-          <Typography variant="body1" gutterBottom sx={{ fontStyle: 'italic' }}>
-            "{plan.overview}"
-          </Typography>
-          
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3, mt: 2 }}>
-            <Box>
-              <Typography variant="body2" color="text.secondary">Estimated Duration:</Typography>
-              <Typography variant="body1">{plan.estimatedDuration}</Typography>
-            </Box>
-            <Box>
-              <Typography variant="body2" color="text.secondary">Estimated Cost:</Typography>
-              <Typography variant="body1">{plan.estimatedCost}</Typography>
-            </Box>
+        <Stack direction="row" justifyContent="space-between" alignItems="flex-start" sx={{ mb: 2 }}>
+          <Box>
+            <Stack direction="row" spacing={1} alignItems="center">
+              <MedicalServicesOutlinedIcon color="primary" />
+              <Typography variant="h6">Treatment plan</Typography>
+              {plan.urgency && (
+                <Chip
+                  size="small"
+                  label={plan.urgency.toUpperCase()}
+                  sx={{ bgcolor: urgencyColor[plan.urgency] || '#64748b', color: 'white' }}
+                />
+              )}
+            </Stack>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1, maxWidth: 640 }}>
+              {plan.overview}
+            </Typography>
           </Box>
-        </Paper>
-        
-        <Typography variant="h6" gutterBottom>Treatment Steps</Typography>
-        <List disablePadding>
-          {plan.steps?.map((step: TreatmentStep, index: number) => (
-            <ListItem 
-              key={index} 
-              sx={{ 
-                p: 0, 
-                mb: 2
-              }}
-              disableGutters
+          <Stack direction="row" spacing={1} alignItems="center">
+            <TextField
+              size="small"
+              select
+              label="Pricing mode"
+              value={pricing}
+              onChange={(e) => setPricing(e.target.value as PricingMode)}
+              sx={{ minWidth: 240 }}
             >
-              <Paper 
-                elevation={1} 
-                sx={{ 
-                  p: 2, 
-                  width: '100%',
+              {(Object.keys(PRICING_LABEL) as PricingMode[]).map((k) => (
+                <MenuItem key={k} value={k}>
+                  {PRICING_LABEL[k]}
+                </MenuItem>
+              ))}
+            </TextField>
+            <Button onClick={fetchPlan} startIcon={<ReplayIcon />} variant="text">
+              Regenerate
+            </Button>
+          </Stack>
+        </Stack>
+
+        <Divider sx={{ my: 2 }} />
+
+        <Typography variant="subtitle2" sx={{ mb: 1 }}>
+          Steps
+        </Typography>
+        <Stack spacing={1.5}>
+          {plan.steps?.map((step, i) => {
+            const price = step.cost_kes?.[pricing] || '—';
+            return (
+              <Box
+                key={i}
+                sx={{
+                  p: 2,
+                  border: '1px solid',
+                  borderColor: 'divider',
                   borderLeft: '4px solid',
-                  borderColor: step.severity ? getSeverityColor(step.severity) : 'primary.main'
+                  borderLeftColor: step.sha_covered ? '#16a34a' : 'primary.main',
+                  borderRadius: 2,
                 }}
               >
-                <Typography variant="subtitle1" gutterBottom>
-                  {index + 1}. {step.step}
-                  {step.severity && (
-                    <Chip 
-                      label={step.severity.toUpperCase()} 
-                      size="small"
-                      sx={{ 
-                        ml: 1,
-                        bgcolor: getSeverityColor(step.severity),
-                        color: 'white',
-                        fontSize: '0.7rem',
-                        height: 20
-                      }} 
-                    />
-                  )}
+                <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" spacing={1}>
+                  <Box>
+                    <Typography variant="subtitle2">
+                      {i + 1}. {step.step}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                      {step.description}
+                    </Typography>
+                  </Box>
+                  <Stack alignItems={{ xs: 'flex-start', sm: 'flex-end' }} spacing={0.5}>
+                    <Chip size="small" label={step.timeframe} />
+                    <Typography variant="body2" fontWeight={600}>
+                      KES {price}
+                    </Typography>
+                    {step.sha_covered && (
+                      <Chip size="small" color="success" label="SHA covered" />
+                    )}
+                    {step.visits ? (
+                      <Typography variant="caption" color="text.secondary">
+                        {step.visits} visit{step.visits > 1 ? 's' : ''}
+                      </Typography>
+                    ) : null}
+                  </Stack>
+                </Stack>
+              </Box>
+            );
+          })}
+        </Stack>
+
+        <Box
+          sx={{
+            mt: 2,
+            p: 2,
+            bgcolor: 'primary.50',
+            border: '1px solid',
+            borderColor: 'primary.100',
+            borderRadius: 2,
+          }}
+        >
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={3} justifyContent="space-between">
+            <Box>
+              <Typography variant="caption" color="text.secondary">
+                Total ({PRICING_LABEL[pricing]})
+              </Typography>
+              <Typography variant="h6" color="primary.main">
+                KES {plan.total_cost_kes?.[pricing] || '—'}
+              </Typography>
+            </Box>
+            {plan.estimated_duration && (
+              <Box>
+                <Typography variant="caption" color="text.secondary">
+                  Duration
                 </Typography>
-                <Typography variant="body2" paragraph>
-                  {step.description}
+                <Typography variant="body1" fontWeight={600}>
+                  {plan.estimated_duration}
                 </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Timeframe: {step.timeframe}
+              </Box>
+            )}
+            {plan.referral && (
+              <Box sx={{ maxWidth: 340 }}>
+                <Typography variant="caption" color="text.secondary">
+                  Referral
                 </Typography>
-              </Paper>
-            </ListItem>
-          ))}
-        </List>
-        
-        {plan.precautions && plan.precautions.length > 0 && (
+                <Typography variant="body2">{plan.referral}</Typography>
+              </Box>
+            )}
+          </Stack>
+        </Box>
+
+        {plan.home_care && plan.home_care.length > 0 && (
           <Box sx={{ mt: 3 }}>
-            <Typography variant="h6" gutterBottom>Precautions</Typography>
-            <Paper elevation={1} sx={{ p: 2 }}>
-              <List dense disablePadding>
-                {plan.precautions.map((precaution, index) => (
-                  <ListItem key={index} sx={{ px: 0 }}>
-                    <ListItemText 
-                      primary={precaution} 
-                      primaryTypographyProps={{ 
-                        variant: 'body2',
-                        component: 'div'
-                      }}
-                    />
-                  </ListItem>
-                ))}
-              </List>
-            </Paper>
+            <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
+              Home care
+            </Typography>
+            <Box component="ul" sx={{ pl: 3, m: 0 }}>
+              {plan.home_care.map((h, i) => (
+                <li key={i}>
+                  <Typography variant="body2">{h}</Typography>
+                </li>
+              ))}
+            </Box>
           </Box>
         )}
-        
+
+        {plan.precautions && plan.precautions.length > 0 && (
+          <Box sx={{ mt: 2 }}>
+            <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
+              Precautions
+            </Typography>
+            <Box component="ul" sx={{ pl: 3, m: 0 }}>
+              {plan.precautions.map((p, i) => (
+                <li key={i}>
+                  <Typography variant="body2">{p}</Typography>
+                </li>
+              ))}
+            </Box>
+          </Box>
+        )}
+
         {plan.alternatives && plan.alternatives.length > 0 && (
-          <Box sx={{ mt: 3 }}>
-            <Typography variant="h6" gutterBottom>Alternative Treatments</Typography>
-            <Paper elevation={1} sx={{ p: 2 }}>
-              <List dense disablePadding>
-                {plan.alternatives.map((alternative, index) => (
-                  <ListItem key={index} sx={{ px: 0 }}>
-                    <ListItemText 
-                      primary={alternative} 
-                      primaryTypographyProps={{ 
-                        variant: 'body2',
-                        component: 'div'
-                      }}
-                    />
-                  </ListItem>
-                ))}
-              </List>
-            </Paper>
+          <Box sx={{ mt: 2 }}>
+            <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
+              Alternatives
+            </Typography>
+            <Box component="ul" sx={{ pl: 3, m: 0 }}>
+              {plan.alternatives.map((a, i) => (
+                <li key={i}>
+                  <Typography variant="body2">{a}</Typography>
+                </li>
+              ))}
+            </Box>
           </Box>
         )}
       </CardContent>
     </Card>
   );
-}; 
+};
+
+export default TreatmentPlan;

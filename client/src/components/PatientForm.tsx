@@ -28,7 +28,7 @@ const PatientForm: React.FC = () => {
     mutationFn: patients.create,
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['patients'] });
-      navigate(`/patients/${data._id}`);
+      navigate(`/patients/${data.id}`);
     },
     onError: (err: any) => {
       setError(err.message || 'Failed to create patient');
@@ -52,21 +52,9 @@ const PatientForm: React.FC = () => {
     }
     
     try {
-      // Fallback option if API fails
-      if (process.env.NODE_ENV === 'development') {
-        try {
-          await createPatientMutation.mutateAsync(formData);
-        } catch (e) {
-          // Create mock patient and navigate
-          console.log('Using mock patient creation');
-          const mockId = 'mock' + Date.now();
-          navigate(`/patients/${mockId}`);
-        }
-      } else {
-        await createPatientMutation.mutateAsync(formData);
-      }
-    } catch (err: any) {
-      // Error is handled in mutation onError
+      await createPatientMutation.mutateAsync(formData);
+    } catch (_) {
+      // handled in onError
     }
   };
 

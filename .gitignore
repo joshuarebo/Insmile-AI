@@ -26,8 +26,26 @@ yarn-error.log
 server/uploads/*
 !/server/uploads/.gitkeep
 
-# credentials
+# local data
+server/data/
+
+# credentials (legacy - AWS no longer used)
 server/config/aws.json
+server/config/aws_config.json
+aws-creds.json
+temp_aws_config.json
+bedrock-policy.json
+trust-policy.json
+eb-env-options*.json
+
+# deploy artifacts
+final-deploy/
+full-deploy/
+temp-deploy/
+*-deploy.zip
+insmile-ai-*.zip
+simple-app*/
+minimal-app*/
 
 dist
 server/public

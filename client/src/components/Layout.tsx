@@ -1,21 +1,52 @@
-import { Outlet, Link, useNavigate } from 'react-router-dom';
-import { useState, useEffect } from 'react';
+import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import {
+  AppBar,
+  Avatar,
+  Box,
+  Button,
+  Chip,
+  Container,
+  IconButton,
+  Stack,
+  Toolbar,
+  Tooltip,
+  Typography,
+} from '@mui/material';
+import HomeOutlinedIcon from '@mui/icons-material/HomeOutlined';
+import PeopleOutlineIcon from '@mui/icons-material/PeopleOutline';
+import MedicalInformationOutlinedIcon from '@mui/icons-material/MedicalInformationOutlined';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import LogoutOutlinedIcon from '@mui/icons-material/LogoutOutlined';
+import { HealthStatus } from '../services/ai';
 
-const Layout = () => {
-  const [user, setUser] = useState<{ name: string; email: string } | null>(null);
+interface Props {
+  health?: HealthStatus | null;
+}
+
+const navItems = [
+  { to: '/', label: 'Dashboard', icon: <HomeOutlinedIcon fontSize="small" /> },
+  { to: '/patients', label: 'Patients', icon: <PeopleOutlineIcon fontSize="small" /> },
+  { to: '/scans', label: 'Scans', icon: <MedicalInformationOutlinedIcon fontSize="small" /> },
+  { to: '/ai', label: 'AI workspace', icon: <AutoAwesomeIcon fontSize="small" />, highlight: true },
+];
+
+const Layout: React.FC<Props> = ({ health }) => {
+  const [user, setUser] = useState<{ name?: string; email?: string } | null>(null);
   const navigate = useNavigate();
+  const location = useLocation();
 
   useEffect(() => {
-    const userString = localStorage.getItem('user');
-    if (userString) {
+    const raw = localStorage.getItem('user');
+    if (raw) {
       try {
-        const userData = JSON.parse(userString);
-        setUser(userData);
-      } catch (error) {
-        console.error('Failed to parse user data', error);
-      }
+        setUser(JSON.parse(raw));
+      } catch (_) {}
     }
   }, []);
+
+  const isActive = (to: string) =>
+    to === '/' ? location.pathname === '/' : location.pathname.startsWith(to);
 
   const handleLogout = () => {
     localStorage.removeItem('isLoggedIn');
@@ -23,66 +54,103 @@ const Layout = () => {
     navigate('/login');
   };
 
+  const aiReady = health?.aiAvailable;
+
   return (
-    <div className="min-h-screen bg-gray-100">
-      {/* Header */}
-      <header className="bg-white shadow">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex justify-between items-center">
-            <div className="flex items-center">
-              <h1 className="text-2xl font-bold text-gray-900">Insmile AI</h1>
-            </div>
-            <div className="flex items-center space-x-4">
-              <span className="text-gray-700">Welcome, {user?.name || user?.email || 'User'}</span>
-              <button
-                onClick={handleLogout}
-                className="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700"
+    <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
+      <AppBar
+        position="sticky"
+        color="default"
+        elevation={0}
+        sx={{ borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'background.paper' }}
+      >
+        <Container maxWidth="xl">
+          <Toolbar disableGutters sx={{ minHeight: 64, gap: 2 }}>
+            <Stack direction="row" alignItems="center" spacing={1.25} sx={{ mr: 2 }}>
+              <Box
+                sx={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 2,
+                  background: 'linear-gradient(135deg,#2563eb,#0ea5e9)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'white',
+                  fontWeight: 800,
+                }}
               >
-                Logout
-              </button>
-            </div>
-          </div>
-        </div>
-      </header>
+                IA
+              </Box>
+              <Box>
+                <Typography variant="subtitle1" fontWeight={700} lineHeight={1}>
+                  Insmile AI
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Kenya dental assistant
+                </Typography>
+              </Box>
+            </Stack>
 
-      {/* Navigation */}
-      <nav className="bg-white shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex space-x-8 py-3">
-            <Link
-              to="/"
-              className="text-gray-900 hover:text-gray-700 px-3 py-2 rounded-md text-sm font-medium"
-            >
-              Dashboard
-            </Link>
-            <Link
-              to="/patients"
-              className="text-gray-900 hover:text-gray-700 px-3 py-2 rounded-md text-sm font-medium"
-            >
-              Patients
-            </Link>
-            <Link
-              to="/scans"
-              className="text-gray-900 hover:text-gray-700 px-3 py-2 rounded-md text-sm font-medium"
-            >
-              Scans
-            </Link>
-            <Link
-              to="/ai"
-              className="bg-blue-600 text-white hover:bg-blue-700 px-3 py-2 rounded-md text-sm font-medium"
-            >
-              AI Dashboard
-            </Link>
-          </div>
-        </div>
-      </nav>
+            <Stack direction="row" spacing={0.5} sx={{ flex: 1, flexWrap: 'wrap' }}>
+              {navItems.map((item) => {
+                const active = isActive(item.to);
+                return (
+                  <Button
+                    key={item.to}
+                    component={Link}
+                    to={item.to}
+                    startIcon={item.icon}
+                    size="small"
+                    variant={active ? 'contained' : 'text'}
+                    color={item.highlight ? 'primary' : 'inherit'}
+                    sx={{
+                      textTransform: 'none',
+                      fontWeight: active ? 600 : 500,
+                      color: active ? undefined : 'text.primary',
+                      borderRadius: 2,
+                      px: 1.5,
+                    }}
+                  >
+                    {item.label}
+                  </Button>
+                );
+              })}
+            </Stack>
 
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            <Stack direction="row" spacing={1.5} alignItems="center">
+              <Tooltip title={aiReady ? 'OpenRouter connected' : 'AI not configured'}>
+                <Chip
+                  size="small"
+                  label={aiReady ? 'AI ready' : 'AI offline'}
+                  color={aiReady ? 'success' : 'default'}
+                  variant={aiReady ? 'filled' : 'outlined'}
+                />
+              </Tooltip>
+              <Avatar sx={{ width: 32, height: 32, bgcolor: 'primary.main' }}>
+                {(user?.name || user?.email || 'U').slice(0, 1).toUpperCase()}
+              </Avatar>
+              <Tooltip title="Logout">
+                <IconButton onClick={handleLogout}>
+                  <LogoutOutlinedIcon />
+                </IconButton>
+              </Tooltip>
+            </Stack>
+          </Toolbar>
+        </Container>
+      </AppBar>
+
+      <Container maxWidth="xl" sx={{ py: 4 }}>
         <Outlet />
-      </main>
-    </div>
+      </Container>
+
+      <Box component="footer" sx={{ py: 3, textAlign: 'center' }}>
+        <Typography variant="caption" color="text.secondary">
+          © {new Date().getFullYear()} Insmile AI · Built for Kenyan dental clinics
+        </Typography>
+      </Box>
+    </Box>
   );
 };
 
-export default Layout; 
+export default Layout;

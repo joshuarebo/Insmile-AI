@@ -1,263 +1,243 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { ai } from '../services/ai';
-import { Box, Card, CardContent, Typography, TextField, IconButton, Paper } from '@mui/material';
+import React, { useEffect, useRef, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import {
+  Avatar,
+  Box,
+  Card,
+  CardContent,
+  IconButton,
+  Stack,
+  TextField,
+  Typography,
+} from '@mui/material';
 import SendIcon from '@mui/icons-material/Send';
-import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
+import SmartToyOutlinedIcon from '@mui/icons-material/SmartToyOutlined';
+import PersonOutlineIcon from '@mui/icons-material/PersonOutline';
+import { sendChatMessage, ChatMessage } from '../services/ai';
 
-interface ChatAssistantProps {
+interface Props {
   patientId: string;
 }
 
-interface Message {
-  id: string;
-  content: string;
-  role: 'user' | 'assistant';
-  timestamp: Date;
-}
+const starters = [
+  'What should a patient with moderate cavities in Kenya expect to pay at a county hospital?',
+  'Explain SHA coverage for a dental extraction.',
+  'What are the signs of early gum disease?',
+  'Outline post-op care after a composite filling in simple English and Kiswahili.',
+];
 
-const ChatAssistant: React.FC<ChatAssistantProps> = ({ patientId }) => {
-  const [messages, setMessages] = useState<Message[]>([
-    { 
-      id: '0', 
-      role: 'assistant', 
-      content: 'Hello! I\'m your dental assistant. How can I help you today?',
-      timestamp: new Date()
-    }
+const ChatAssistant: React.FC<Props> = ({ patientId }) => {
+  const [messages, setMessages] = useState<ChatMessage[]>([
+    {
+      id: 'intro',
+      role: 'assistant',
+      content:
+        'Habari! I am Insmile, your Kenya-focused dental assistant. Ask me about findings, treatments, SHA coverage, or patient education.',
+      timestamp: new Date().toISOString(),
+    },
   ]);
   const [input, setInput] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [apiSource, setApiSource] = useState<string | null>(null);
-  const endOfMessagesRef = useRef<HTMLDivElement>(null);
-  const messagesContainerRef = useRef<HTMLDivElement>(null);
-  const [showScrollButton, setShowScrollButton] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Preserve scroll position when new messages are added
   useEffect(() => {
-    if (messagesContainerRef.current && messages.length > 1) {
-      const container = messagesContainerRef.current;
-      const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
-      
-      if (isNearBottom) {
-        // Auto-scroll only if user was already at the bottom
-        scrollToBottom();
-      } else {
-        // If user has scrolled up, maintain their position
-        setShowScrollButton(true);
-      }
-    }
-  }, [messages]);
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+  }, [messages, loading]);
 
-  // Monitor scroll position
-  useEffect(() => {
-    const handleScroll = () => {
-      if (messagesContainerRef.current) {
-        const container = messagesContainerRef.current;
-        const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
-        
-        setShowScrollButton(!isNearBottom);
-      }
-    };
-
-    const container = messagesContainerRef.current;
-    if (container) {
-      container.addEventListener('scroll', handleScroll);
-      return () => container.removeEventListener('scroll', handleScroll);
-    }
-  }, []);
-
-  const scrollToBottom = () => {
-    endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' });
-    setShowScrollButton(false);
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim() || isLoading) return;
-
-    // Create user message
-    const userMessage: Message = {
+  const send = async (text: string) => {
+    if (!text.trim() || loading) return;
+    const user: ChatMessage = {
       id: Date.now().toString(),
       role: 'user',
-      content: input.trim(),
-      timestamp: new Date()
+      content: text.trim(),
+      timestamp: new Date().toISOString(),
     };
-    
-    // Add to messages and clear input
-    setMessages(prev => [...prev, userMessage]);
+    setMessages((prev) => [...prev, user]);
     setInput('');
-    setIsLoading(true);
-    
+    setLoading(true);
     try {
-      console.log(`Sending message to AI: ${userMessage.content}`);
-      
-      // Get chat history (last 5 messages maximum)
-      const chatHistory = messages.slice(-5).map(msg => ({
-        role: msg.role,
-        content: msg.content
-      }));
-      
-      // Send to AI service 
-      const response = await ai.sendChatMessage(userMessage.content, patientId, chatHistory);
-      console.log('Received response:', response);
-      
-      // Add AI response to chat
-      const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: response.message || "I'm sorry, I couldn't process your request.",
-        timestamp: new Date()
-      };
-      
-      setMessages(prev => [...prev, assistantMessage]);
-      
-      // Track where the response came from (for debugging)
-      setApiSource(response.source || 'unknown');
-    } catch (error) {
-      console.error('Error sending message:', error);
-      
-      // Add error message to chat
-      const errorMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: "I'm having trouble connecting to the AI service right now. Please try again in a moment.",
-        timestamp: new Date()
-      };
-      
-      setMessages(prev => [...prev, errorMessage]);
-      setApiSource('error');
+      const { message } = await sendChatMessage(text.trim(), patientId, messages);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: message || 'I did not catch that, please try again.',
+          timestamp: new Date().toISOString(),
+        },
+      ]);
+    } catch (err: any) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content:
+            'I am having trouble reaching the AI right now. Please check your connection and try again.',
+          timestamp: new Date().toISOString(),
+        },
+      ]);
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    send(input);
   };
 
   return (
-    <Card variant="outlined" sx={{ height: '500px', display: 'flex', flexDirection: 'column' }}>
-      <CardContent sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', p: 2, position: 'relative' }}>
-        <Typography variant="h6" component="h2" gutterBottom>
-          Chat Assistant
-        </Typography>
-        
-        <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-          <Box sx={{ 
-            width: 8, 
-            height: 8, 
-            borderRadius: '50%', 
-            bgcolor: 'success.main',
-            mr: 1 
-          }} />
-          <Typography variant="body2">Online</Typography>
-          
-          {apiSource && (
-            <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto' }}>
-              Source: {apiSource}
+    <Card variant="outlined" sx={{ borderRadius: 3, height: 620, display: 'flex', flexDirection: 'column' }}>
+      <CardContent sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 2 }}>
+          <Avatar sx={{ bgcolor: 'primary.main' }}>
+            <SmartToyOutlinedIcon />
+          </Avatar>
+          <Box>
+            <Typography variant="subtitle1" fontWeight={600}>
+              Insmile — dental assistant
             </Typography>
-          )}
-        </Box>
-        
-        <Box 
-          ref={messagesContainerRef}
-          sx={{ 
-            flexGrow: 1, 
-            overflow: 'auto', 
+            <Typography variant="caption" color="text.secondary">
+              Tailored for Kenyan clinics · SHA-aware · KES pricing
+            </Typography>
+          </Box>
+        </Stack>
+
+        <Box
+          ref={scrollRef}
+          sx={{
+            flex: 1,
+            overflowY: 'auto',
+            bgcolor: 'grey.50',
+            borderRadius: 2,
+            p: 2,
             mb: 2,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 1,
-            pr: 1,
-            pl: 1,
-            pt: 1,
-            height: '350px',
-            '&::-webkit-scrollbar': {
-              width: '8px',
-            },
-            '&::-webkit-scrollbar-track': {
-              background: '#f1f1f1',
-              borderRadius: '4px',
-            },
-            '&::-webkit-scrollbar-thumb': {
-              background: '#888', 
-              borderRadius: '4px',
-            },
-            '&::-webkit-scrollbar-thumb:hover': {
-              background: '#555',
-            },
           }}
         >
-          {messages.map((message) => (
-            <Box 
-              key={message.id} 
-              sx={{ 
-                display: 'flex', 
-                justifyContent: message.role === 'user' ? 'flex-end' : 'flex-start',
-                mb: 1
-              }}
-            >
-              <Paper 
-                elevation={1} 
-                sx={{ 
-                  p: 2, 
-                  maxWidth: '80%',
-                  bgcolor: message.role === 'user' ? 'primary.light' : 'grey.100',
-                  borderRadius: '8px'
+          <Stack spacing={1.5}>
+            {messages.map((m, i) => {
+              const isUser = m.role === 'user';
+              return (
+                <Stack key={m.id || i} direction="row" spacing={1.25} justifyContent={isUser ? 'flex-end' : 'flex-start'}>
+                  {!isUser && (
+                    <Avatar sx={{ bgcolor: 'primary.main', width: 28, height: 28 }}>
+                      <SmartToyOutlinedIcon fontSize="small" />
+                    </Avatar>
+                  )}
+                  <Box
+                    sx={{
+                      maxWidth: '78%',
+                      bgcolor: isUser ? 'primary.main' : 'white',
+                      color: isUser ? 'white' : 'text.primary',
+                      borderRadius: 2,
+                      px: 1.75,
+                      py: 1.25,
+                      border: isUser ? 'none' : '1px solid',
+                      borderColor: 'divider',
+                      '& p': { m: 0, mb: 1, '&:last-child': { mb: 0 } },
+                      '& ul, & ol': { pl: 2.5, m: 0, mb: 1 },
+                      '& li': { mb: 0.25 },
+                      '& h1, & h2, & h3, & h4': {
+                        mt: 1,
+                        mb: 0.5,
+                        fontSize: '0.95rem',
+                        fontWeight: 700,
+                      },
+                      '& code': {
+                        bgcolor: isUser ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.06)',
+                        px: 0.5,
+                        py: 0.1,
+                        borderRadius: 0.5,
+                        fontSize: '0.85em',
+                      },
+                      '& table': {
+                        borderCollapse: 'collapse',
+                        width: '100%',
+                        my: 1,
+                        fontSize: '0.85rem',
+                      },
+                      '& th, & td': {
+                        border: '1px solid',
+                        borderColor: isUser ? 'rgba(255,255,255,0.3)' : 'divider',
+                        px: 0.75,
+                        py: 0.5,
+                        textAlign: 'left',
+                      },
+                      '& th': { bgcolor: isUser ? 'rgba(255,255,255,0.1)' : 'action.hover' },
+                      '& a': { color: isUser ? 'white' : 'primary.main', textDecoration: 'underline' },
+                      '& strong': { fontWeight: 700 },
+                      '& hr': { my: 1, border: 0, borderTop: '1px solid', borderColor: 'divider' },
+                      fontSize: '0.875rem',
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {isUser ? (
+                      <Typography variant="body2">{m.content}</Typography>
+                    ) : (
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
+                    )}
+                  </Box>
+                  {isUser && (
+                    <Avatar sx={{ bgcolor: 'grey.400', width: 28, height: 28 }}>
+                      <PersonOutlineIcon fontSize="small" />
+                    </Avatar>
+                  )}
+                </Stack>
+              );
+            })}
+            {loading && (
+              <Stack direction="row" spacing={1.25}>
+                <Avatar sx={{ bgcolor: 'primary.main', width: 28, height: 28 }}>
+                  <SmartToyOutlinedIcon fontSize="small" />
+                </Avatar>
+                <Box sx={{ bgcolor: 'white', borderRadius: 2, px: 1.75, py: 1.25, border: '1px solid', borderColor: 'divider' }}>
+                  <Typography variant="body2" color="text.secondary">
+                    thinking…
+                  </Typography>
+                </Box>
+              </Stack>
+            )}
+          </Stack>
+        </Box>
+
+        {messages.length <= 1 && (
+          <Stack direction="row" flexWrap="wrap" spacing={1} sx={{ mb: 1.5 }}>
+            {starters.map((s) => (
+              <Box
+                key={s}
+                onClick={() => send(s)}
+                sx={{
+                  px: 1.25,
+                  py: 0.75,
+                  border: '1px solid',
+                  borderColor: 'divider',
+                  borderRadius: 2,
+                  cursor: 'pointer',
+                  mb: 1,
+                  '&:hover': { bgcolor: 'action.hover' },
                 }}
               >
-                <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
-                  {message.content}
-                </Typography>
-              </Paper>
-            </Box>
-          ))}
-          
-          {isLoading && (
-            <Box sx={{ display: 'flex', justifyContent: 'flex-start', mb: 1 }}>
-              <Paper elevation={1} sx={{ p: 2, bgcolor: 'grey.100', borderRadius: '8px' }}>
-                <Typography variant="body2">Typing...</Typography>
-              </Paper>
-            </Box>
-          )}
-          
-          <div ref={endOfMessagesRef} />
-        </Box>
-        
-        {showScrollButton && (
-          <IconButton 
-            size="small" 
-            color="primary" 
-            onClick={scrollToBottom}
-            sx={{ 
-              position: 'absolute', 
-              bottom: 80, 
-              right: 20, 
-              zIndex: 2,
-              backgroundColor: 'white',
-              boxShadow: 2,
-              '&:hover': {
-                backgroundColor: 'grey.100',
-              }
-            }}
-          >
-            <ArrowDownwardIcon fontSize="small" />
-          </IconButton>
+                <Typography variant="caption">{s}</Typography>
+              </Box>
+            ))}
+          </Stack>
         )}
-        
-        <Box component="form" onSubmit={handleSubmit} sx={{ mt: 'auto' }}>
+
+        <Box component="form" onSubmit={handleSubmit}>
           <TextField
             fullWidth
-            size="small"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Ask a dental question..."
-            disabled={isLoading}
+            placeholder="Ask about findings, procedures, SHA cover, Kiswahili patient instructions…"
+            disabled={loading}
             InputProps={{
               endAdornment: (
-                <IconButton 
-                  type="submit"
-                  color="primary"
-                  disabled={isLoading || !input.trim()}
-                >
+                <IconButton type="submit" color="primary" disabled={loading || !input.trim()}>
                   <SendIcon />
                 </IconButton>
-              )
+              ),
             }}
           />
         </Box>
@@ -266,4 +246,4 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ patientId }) => {
   );
 };
 
-export default ChatAssistant; 
+export default ChatAssistant;
