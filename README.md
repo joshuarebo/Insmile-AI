@@ -1,5 +1,7 @@
 # Insmile AI — Dental Treatment Planning for Kenya
 
+[![CI](https://github.com/joshuarebo/Insmile-AI/actions/workflows/ci.yml/badge.svg)](https://github.com/joshuarebo/Insmile-AI/actions/workflows/ci.yml)
+
 Insmile AI is an AI-assisted dental workflow tool tailored for Kenyan clinics. It lets a
 dentist upload a scan (X-ray, panoramic, or intraoral photo), see AI-highlighted findings
 drawn directly on the image, generate a **Kenya-priced treatment plan** (KES, SHA-aware),
@@ -111,6 +113,41 @@ Both `google/gemma-3-27b-it:free` and `meta-llama/llama-3.3-70b-instruct:free` a
 tier and may occasionally return HTTP 429 when upstream providers are rate-limiting. The
 server surfaces the error; just retry. For production load, register for a paid
 OpenRouter tier or point to a self-hosted model.
+
+## CI/CD pipeline
+
+**Continuous Integration** runs on every push and PR via GitHub Actions
+(`.github/workflows/ci.yml`):
+- Client: `npm ci` → `tsc --noEmit` → production build with `CI=true` (warnings fail)
+- Server: `npm ci` → `node --check` on every source file → 5-second smoke boot
+
+A red check on a commit blocks the downstream deploys from being trusted.
+
+**Continuous Deployment** is automatic:
+- Push to `main` → Vercel rebuilds and publishes the frontend (~2 min)
+- Push to `main` → Render rebuilds and restarts the backend (~3 min)
+
+No manual deploy steps. Roll back by reverting the commit on `main` and pushing.
+
+## On "continuous training" and model drift
+
+This application **does not own an ML model** — all inference is delegated to hosted
+LLMs via OpenRouter and Google AI Studio. There are no weights, no training data, and
+no drift to monitor on our side. The provider rotation in `server/src/services/openrouter.js`
+handles *availability* drift (models going offline, changing behavior) by trying
+alternatives automatically.
+
+If a future version trains a custom dental-imaging model (e.g., a YOLO cavity detector
+or fine-tuned VLM), the continuous-training pipeline would need:
+
+1. A labeled dataset store (scans + dentist-verified bbox corrections)
+2. A retraining workflow (weekly, triggered by N new labels)
+3. Experiment tracking (MLflow or Weights & Biases)
+4. Model registry with versioned checkpoints
+5. Drift monitoring (PSI/KS tests on finding distributions, confidence calibration)
+6. Canary deploy with automatic rollback if drift exceeds threshold
+
+Until a custom model exists, this is intentionally out of scope.
 
 ## License
 
