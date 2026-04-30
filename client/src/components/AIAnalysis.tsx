@@ -105,8 +105,8 @@ const AIAnalysis: React.FC<Props> = ({ scanId, patientId, onAnalysisReady }) => 
     }
   }, [result, onAnalysisReady]);
 
-  const findings = result?.findings || [];
-  const recommendations = result?.recommendations || [];
+  const findings = useMemo(() => result?.findings || [], [result]);
+  const recommendations = useMemo(() => result?.recommendations || [], [result]);
 
   const severityCounts = useMemo(() => {
     const base = { severe: 0, moderate: 0, mild: 0 } as Record<string, number>;

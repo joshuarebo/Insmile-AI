@@ -6,7 +6,7 @@ import { ScanUploader } from '../components/ScanUploader';
 import AIAnalysis from '../components/AIAnalysis';
 import ChatAssistant from '../components/ChatAssistant';
 import { TreatmentPlan } from '../components/TreatmentPlan';
-import { API_BASE_URL, scanImageUrl } from '../services/ai';
+import { API_BASE_URL } from '../services/ai';
 
 interface Patient {
   id: string;

@@ -70,7 +70,7 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({
     // Auto-hide non-persistent notifications
     if (!newNotification.persistent && newNotification.duration) {
       setTimeout(() => {
-        hideNotification(id);
+        setNotifications(prev => prev.filter(n => n.id !== id));
       }, newNotification.duration);
     }
   }, [maxNotifications]);

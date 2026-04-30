@@ -3,7 +3,6 @@ import {
   Alert,
   Box,
   Card,
-  CardContent,
   Chip,
   Stack,
   Tab,
