@@ -1,13 +1,17 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.REACT_APP_SUPABASE_URL || '';
-const supabaseAnonKey = process.env.REACT_APP_SUPABASE_ANON_KEY || '';
+// Strip any whitespace/newlines that may be injected by build systems
+const supabaseUrl = (process.env.REACT_APP_SUPABASE_URL || '').replace(/\s/g, '');
+const supabaseAnonKey = (process.env.REACT_APP_SUPABASE_ANON_KEY || '').replace(/\s/g, '');
 
 if (!supabaseUrl || !supabaseAnonKey) {
   console.error(
-    'Missing REACT_APP_SUPABASE_URL or REACT_APP_SUPABASE_ANON_KEY. ' +
-    'Add them to your .env file or Vercel environment variables and rebuild.'
+    '[Insmile] Supabase env vars missing at build time. ' +
+    'Add REACT_APP_SUPABASE_URL and REACT_APP_SUPABASE_ANON_KEY to Vercel and redeploy.'
   );
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+export const supabase = createClient(
+  supabaseUrl || 'https://placeholder.supabase.co',
+  supabaseAnonKey || 'placeholder-key-will-fail-on-auth'
+);
