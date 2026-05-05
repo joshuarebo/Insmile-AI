@@ -58,6 +58,11 @@ vite.config.ts.*
 .env.development.local
 .env.test.local
 .env.production.local
+server/.env
+client/.env
+
+# Test artifacts
+server/tests/test-context.json
 
 # Logs
 logs

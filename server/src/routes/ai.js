@@ -1,69 +1,24 @@
 const express = require('express');
 const multer = require('multer');
 const path = require('path');
-const fs = require('fs');
 
 const ai = require('../services/ai');
-const store = require('../store');
+const { supabaseAdmin } = require('../lib/supabase');
+const { requireAuth } = require('../middleware/auth');
 
 const router = express.Router();
 
-const uploadDir = path.join(__dirname, '../../uploads');
-const analysisDir = path.join(__dirname, '../../data/analysis');
-const plansDir = path.join(__dirname, '../../data/treatment-plans');
-fs.mkdirSync(uploadDir, { recursive: true });
-fs.mkdirSync(analysisDir, { recursive: true });
-fs.mkdirSync(plansDir, { recursive: true });
-
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, uploadDir),
-  filename: (_req, file, cb) => {
-    const suffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    cb(null, suffix + path.extname(file.originalname));
-  },
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 15 * 1024 * 1024 },
 });
-const upload = multer({ storage, limits: { fileSize: 15 * 1024 * 1024 } });
 
-// Shared in-memory analysis state
+// In-memory analysis state (for tracking ongoing background analyses)
 if (!global.activeAnalyses) global.activeAnalyses = new Map();
-if (!global.patientLatestAnalyses) global.patientLatestAnalyses = {};
-if (!global.patientTreatmentPlans) global.patientTreatmentPlans = {};
 const activeAnalyses = global.activeAnalyses;
 
 function setAnalysis(scanId, data) {
   activeAnalyses.set(scanId, { ...(activeAnalyses.get(scanId) || {}), ...data });
-}
-
-function startAnalysisInBackground(scanId, filePath, patientId) {
-  if (!filePath || !fs.existsSync(filePath)) return false;
-  const current = activeAnalyses.get(scanId);
-  if (current && (current.status === 'processing' || current.status === 'completed')) return true;
-  setAnalysis(scanId, { status: 'processing', progress: 15, filePath, patientId });
-  (async () => {
-    try {
-      setAnalysis(scanId, { progress: 40 });
-      const imageBuffer = fs.readFileSync(filePath);
-      const result = await ai.analyzeScan(imageBuffer);
-      if (!isUsableAnalysis(result)) {
-        setAnalysis(scanId, {
-          status: 'failed',
-          progress: 0,
-          error: 'Vision model returned unparseable output. Please retry — the next run will try a different model.',
-        });
-        store.updateScan(scanId, { status: 'failed' });
-        return;
-      }
-      setAnalysis(scanId, { status: 'completed', progress: 100, result });
-      persistAnalysis(scanId, result);
-      const pid = patientId || 'unknown';
-      global.patientLatestAnalyses[pid] = { scanId, result };
-      store.updateScan(scanId, { status: 'analyzed' });
-    } catch (err) {
-      console.error(`Background analysis failed for ${scanId}:`, err.message);
-      setAnalysis(scanId, { status: 'failed', progress: 0, error: err.message });
-    }
-  })();
-  return true;
 }
 
 function isUsableAnalysis(result) {
@@ -74,35 +29,62 @@ function isUsableAnalysis(result) {
   return true;
 }
 
-function persistAnalysis(scanId, result) {
-  // Never persist an empty / fallback / unparseable result — it would poison future polls.
-  if (!isUsableAnalysis(result)) {
-    console.warn(`[analysis] not persisting unusable result for ${scanId}`);
-    return;
-  }
+async function persistAnalysis(scanId, companyId, patientId, result, model) {
+  if (!isUsableAnalysis(result)) return;
   try {
-    fs.writeFileSync(path.join(analysisDir, `${scanId}.json`), JSON.stringify(result, null, 2));
+    await supabaseAdmin.from('analyses').upsert({
+      scan_id: scanId,
+      company_id: companyId,
+      patient_id: patientId,
+      status: 'completed',
+      findings: result.findings,
+      summary: result.overall || null,
+      model_used: model || result.model || null,
+      completed_at: new Date().toISOString(),
+    }, { onConflict: 'scan_id' });
   } catch (err) {
     console.warn('Failed to persist analysis:', err.message);
   }
 }
 
-function loadAnalysis(scanId) {
+async function loadAnalysis(scanId) {
   try {
-    const p = path.join(analysisDir, `${scanId}.json`);
-    if (!fs.existsSync(p)) return null;
-    const parsed = JSON.parse(fs.readFileSync(p, 'utf8'));
-    if (!isUsableAnalysis(parsed)) {
-      // stale/poisoned — remove so we'll retry
-      try { fs.unlinkSync(p); } catch (_) {}
-      return null;
-    }
-    return parsed;
-  } catch (_) {}
-  return null;
+    const { data } = await supabaseAdmin
+      .from('analyses')
+      .select('*')
+      .eq('scan_id', scanId)
+      .eq('status', 'completed')
+      .single();
+
+    if (!data) return null;
+    const result = { findings: data.findings, overall: data.summary, model: data.model_used };
+    if (!isUsableAnalysis(result)) return null;
+    return result;
+  } catch (_) {
+    return null;
+  }
 }
 
-// ---------- Health / config ----------
+async function getScanImageBuffer(scanId, companyId) {
+  const { data: scan } = await supabaseAdmin
+    .from('scans')
+    .select('file_path')
+    .eq('id', scanId)
+    .eq('company_id', companyId)
+    .single();
+
+  if (!scan) return null;
+
+  const { data, error } = await supabaseAdmin.storage
+    .from('scans')
+    .download(scan.file_path);
+
+  if (error || !data) return null;
+  const arrayBuffer = await data.arrayBuffer();
+  return Buffer.from(arrayBuffer);
+}
+
+// ---------- Health / config (public) ----------
 router.get('/health', (_req, res) => {
   res.json({
     status: 'ok',
@@ -133,91 +115,116 @@ router.get('/test', async (_req, res) => {
 });
 
 // ---------- Upload + analyze ----------
-router.post('/upload-scan', upload.single('scan'), async (req, res) => {
+router.post('/upload-scan', requireAuth, upload.single('scan'), async (req, res) => {
   if (!req.file) return res.status(400).json({ success: false, message: 'No file uploaded' });
 
-  const patientId = req.body.patientId || 'unknown';
-  const scanType = req.body.scanType || 'xray';
+  const patientId = req.body.patientId;
+  const scanType = req.body.scanType || 'unknown';
 
-  const scan = store.createScan({
-    patientId,
-    scanType,
-    fileName: req.file.originalname,
-    filePath: req.file.path,
-    size: req.file.size,
-    status: 'analyzing',
-  });
+  try {
+    const ext = path.extname(req.file.originalname).toLowerCase();
+    const fileName = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}${ext}`;
+    const storagePath = `${req.companyId}/${patientId || 'unassigned'}/${fileName}`;
 
-  setAnalysis(scan.id, {
-    status: 'processing',
-    progress: 10,
-    patientId,
-    filePath: req.file.path,
-    startedAt: new Date().toISOString(),
-  });
+    const { error: uploadError } = await supabaseAdmin.storage
+      .from('scans')
+      .upload(storagePath, req.file.buffer, {
+        contentType: req.file.mimetype,
+        upsert: false,
+      });
 
-  res.json({ success: true, scanId: scan.id, message: 'Scan uploaded; analysis started' });
+    if (uploadError) throw uploadError;
 
-  // background analysis
-  (async () => {
-    try {
-      setAnalysis(scan.id, { progress: 30 });
-      const imageBuffer = fs.readFileSync(req.file.path);
-      const result = await ai.analyzeScan(imageBuffer);
-      if (!isUsableAnalysis(result)) {
-        setAnalysis(scan.id, {
-          status: 'failed',
-          progress: 0,
-          error: 'Vision model returned unparseable output. Please retry — the next run will try a different model.',
-        });
-        store.updateScan(scan.id, { status: 'failed' });
-        return;
+    const { data: scan, error: dbError } = await supabaseAdmin
+      .from('scans')
+      .insert({
+        company_id: req.companyId,
+        patient_id: patientId || null,
+        file_path: storagePath,
+        file_name: req.file.originalname,
+        scan_type: scanType,
+        uploaded_by: req.user.id,
+      })
+      .select()
+      .single();
+
+    if (dbError) throw dbError;
+
+    // Create pending analysis record
+    await supabaseAdmin.from('analyses').insert({
+      scan_id: scan.id,
+      company_id: req.companyId,
+      patient_id: patientId || null,
+      status: 'processing',
+    });
+
+    setAnalysis(scan.id, {
+      status: 'processing',
+      progress: 10,
+      companyId: req.companyId,
+      patientId,
+    });
+
+    res.json({ success: true, scanId: scan.id, message: 'Scan uploaded; analysis started' });
+
+    // Background analysis
+    (async () => {
+      try {
+        setAnalysis(scan.id, { progress: 30 });
+        const imageBuffer = req.file.buffer;
+        const result = await ai.analyzeScan(imageBuffer);
+
+        if (!isUsableAnalysis(result)) {
+          setAnalysis(scan.id, {
+            status: 'failed',
+            progress: 0,
+            error: 'Vision model returned unparseable output. Please retry.',
+          });
+          await supabaseAdmin.from('analyses').update({ status: 'failed', error_message: 'Unparseable output' }).eq('scan_id', scan.id);
+          return;
+        }
+
+        setAnalysis(scan.id, { status: 'completed', progress: 100, result });
+        await persistAnalysis(scan.id, req.companyId, patientId, result);
+      } catch (err) {
+        console.error('Analysis failed:', err.message);
+        setAnalysis(scan.id, { status: 'failed', progress: 0, error: err.message });
+        await supabaseAdmin.from('analyses').update({ status: 'failed', error_message: err.message }).eq('scan_id', scan.id);
       }
-      setAnalysis(scan.id, {
-        status: 'completed',
-        progress: 100,
-        result,
-        completedAt: new Date().toISOString(),
-      });
-      persistAnalysis(scan.id, result);
-      store.updateScan(scan.id, { status: 'analyzed' });
-      global.patientLatestAnalyses[patientId] = { scanId: scan.id, result };
-    } catch (err) {
-      console.error('Analysis failed:', err.message);
-      setAnalysis(scan.id, {
-        status: 'failed',
-        progress: 0,
-        error: err.message,
-      });
-      store.updateScan(scan.id, { status: 'failed' });
-    }
-  })();
+    })();
+  } catch (err) {
+    console.error('Upload error:', err);
+    res.status(500).json({ success: false, message: 'Failed to upload scan' });
+  }
 });
 
-// Analyze a previously uploaded scan (synchronous)
-router.post('/analyze/:scanId', async (req, res) => {
+// Analyze a previously uploaded scan
+router.post('/analyze/:scanId', requireAuth, async (req, res) => {
   const { scanId } = req.params;
+
+  // Check in-memory
   const cached = activeAnalyses.get(scanId);
   if (cached && cached.status === 'completed' && cached.result) {
     return res.json(cached.result);
   }
-  const disk = loadAnalysis(scanId);
+
+  // Check DB
+  const disk = await loadAnalysis(scanId);
   if (disk) return res.json(disk);
 
-  const scan = store.getScan(scanId);
-  const filePath = (scan && scan.filePath) || (cached && cached.filePath);
-  if (!filePath || !fs.existsSync(filePath)) {
-    return res.status(404).json({ error: 'Scan file not found' });
-  }
-
+  // Run analysis
   try {
+    const imageBuffer = await getScanImageBuffer(scanId, req.companyId);
+    if (!imageBuffer) return res.status(404).json({ error: 'Scan file not found' });
+
     setAnalysis(scanId, { status: 'processing', progress: 30 });
-    const imageBuffer = fs.readFileSync(filePath);
     const result = await ai.analyzeScan(imageBuffer);
     setAnalysis(scanId, { status: 'completed', progress: 100, result });
-    persistAnalysis(scanId, result);
-    const patientId = (scan && scan.patientId) || (cached && cached.patientId) || 'unknown';
-    global.patientLatestAnalyses[patientId] = { scanId, result };
+
+    // Get patient_id from scan record
+    const { data: scanRecord } = await supabaseAdmin.from('scans').select('patient_id').eq('id', scanId).single();
+    await persistAnalysis(scanId, req.companyId, scanRecord?.patient_id, result);
+
     res.json(result);
   } catch (err) {
     setAnalysis(scanId, { status: 'failed', error: err.message });
@@ -225,19 +232,43 @@ router.post('/analyze/:scanId', async (req, res) => {
   }
 });
 
-router.get('/analysis/:scanId', (req, res) => {
+router.get('/analysis/:scanId', requireAuth, async (req, res) => {
   const { scanId } = req.params;
+
+  // Check in-memory
   const mem = activeAnalyses.get(scanId);
   if (mem && mem.status === 'completed' && mem.result) {
     return res.json({ ...mem.result, scanId });
   }
-  const disk = loadAnalysis(scanId);
-  if (disk) return res.json({ ...disk, scanId });
-  const scan = store.getScan(scanId);
-  if (scan && scan.filePath) {
-    startAnalysisInBackground(scanId, scan.filePath, scan.patientId);
+
+  // Check DB
+  const db = await loadAnalysis(scanId);
+  if (db) return res.json({ ...db, scanId });
+
+  // If scan exists, start background analysis
+  const imageBuffer = await getScanImageBuffer(scanId, req.companyId).catch(() => null);
+  if (imageBuffer) {
+    setAnalysis(scanId, { status: 'processing', progress: 15 });
+
+    // Start background analysis
+    (async () => {
+      try {
+        const result = await ai.analyzeScan(imageBuffer);
+        if (isUsableAnalysis(result)) {
+          setAnalysis(scanId, { status: 'completed', progress: 100, result });
+          const { data: scanRecord } = await supabaseAdmin.from('scans').select('patient_id').eq('id', scanId).single();
+          await persistAnalysis(scanId, req.companyId, scanRecord?.patient_id, result);
+        } else {
+          setAnalysis(scanId, { status: 'failed', error: 'Unparseable output' });
+        }
+      } catch (err) {
+        setAnalysis(scanId, { status: 'failed', error: err.message });
+      }
+    })();
+
     return res.status(202).json({ scanId, status: 'processing', progress: 15 });
   }
+
   return res.status(404).json({ error: 'Analysis not found', scanId });
 });
 
@@ -252,53 +283,75 @@ function statusHandler(req, res) {
       error: mem.error,
     });
   }
-  if (loadAnalysis(scanId)) {
-    return res.json({ scanId, status: 'completed', progress: 100 });
-  }
-  const scan = store.getScan(scanId);
-  if (scan && scan.filePath) {
-    startAnalysisInBackground(scanId, scan.filePath, scan.patientId);
-    return res.json({ scanId, status: 'processing', progress: 15 });
-  }
-  res.status(404).json({ scanId, status: 'not_found' });
+  // Check DB asynchronously
+  loadAnalysis(scanId).then(data => {
+    if (data) return res.json({ scanId, status: 'completed', progress: 100 });
+    res.status(404).json({ scanId, status: 'not_found' });
+  });
 }
 
-router.get('/analysis/:scanId/status', statusHandler);
-router.get('/analysis/status/:scanId', statusHandler);
+router.get('/analysis/:scanId/status', requireAuth, statusHandler);
+router.get('/analysis/status/:scanId', requireAuth, statusHandler);
 
 // ---------- Treatment plan ----------
-router.post('/treatment-plan', async (req, res) => {
+router.post('/treatment-plan', requireAuth, async (req, res) => {
   try {
     const { patientId, scanId, pricingMode } = req.body;
     let analysis = null;
+
     if (scanId) {
       const mem = activeAnalyses.get(scanId);
       if (mem && mem.status === 'completed') analysis = mem.result;
-      if (!analysis) analysis = loadAnalysis(scanId);
+      if (!analysis) analysis = await loadAnalysis(scanId);
     }
-    if (!analysis && patientId && global.patientLatestAnalyses[patientId]) {
-      analysis = global.patientLatestAnalyses[patientId].result;
+
+    if (!analysis && patientId) {
+      // Get latest analysis for patient
+      const { data } = await supabaseAdmin
+        .from('analyses')
+        .select('findings, summary, model_used')
+        .eq('patient_id', patientId)
+        .eq('company_id', req.companyId)
+        .eq('status', 'completed')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+      if (data) analysis = { findings: data.findings, overall: data.summary };
     }
-    if (!analysis || !Array.isArray(analysis.findings)) {
+
+    if (!analysis || !Array.isArray(analysis.findings) || analysis.findings.length === 0) {
       return res.status(400).json({ error: 'No analysis findings available for this patient.' });
     }
 
-    const patient = patientId ? store.getPatient(patientId) : null;
+    // Get patient data for context
+    let patient = null;
+    if (patientId) {
+      const { data } = await supabaseAdmin
+        .from('patients')
+        .select('*')
+        .eq('id', patientId)
+        .eq('company_id', req.companyId)
+        .single();
+      patient = data;
+    }
+
     const plan = await ai.generateTreatmentPlan(analysis.findings, {
       ...(patient || {}),
       pricingMode: pricingMode || 'private_mid',
     });
 
-    plan.patientId = patientId || null;
-    plan.scanId = scanId || null;
+    // Persist treatment plan
+    await supabaseAdmin.from('treatment_plans').insert({
+      patient_id: patientId || null,
+      company_id: req.companyId,
+      scan_id: scanId || null,
+      steps: plan.steps || [],
+      pricing_mode: pricingMode || 'private_mid',
+      total_kes: plan.estimatedTotal || null,
+      sha_covered: plan.shaCoverage || false,
+      created_by: req.user.id,
+    });
 
-    if (patientId) global.patientTreatmentPlans[patientId] = plan;
-    try {
-      fs.writeFileSync(
-        path.join(plansDir, `${patientId || 'anonymous'}-${Date.now()}.json`),
-        JSON.stringify(plan, null, 2)
-      );
-    } catch (_) {}
     res.json(plan);
   } catch (err) {
     console.error('Treatment plan error:', err.message);
@@ -313,27 +366,45 @@ router.post('/treatment-plan', async (req, res) => {
 });
 
 // ---------- Chat ----------
-router.post('/chat', async (req, res) => {
+router.post('/chat', requireAuth, async (req, res) => {
   const { message, patientId, chatHistory } = req.body;
   if (!message) return res.status(400).json({ success: false, message: 'No message provided' });
 
-  // Build patient context from latest analysis + plan
+  // Build patient context
   const ctxParts = [];
-  if (patientId && global.patientLatestAnalyses[patientId]) {
-    const a = global.patientLatestAnalyses[patientId].result;
-    if (a && Array.isArray(a.findings) && a.findings.length) {
+  if (patientId) {
+    // Get latest analysis
+    const { data: analysisData } = await supabaseAdmin
+      .from('analyses')
+      .select('findings')
+      .eq('patient_id', patientId)
+      .eq('company_id', req.companyId)
+      .eq('status', 'completed')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (analysisData && Array.isArray(analysisData.findings) && analysisData.findings.length) {
       ctxParts.push(
         'Recent dental findings:\n' +
-          a.findings.map((f) => `- ${f.label} (${f.severity})`).join('\n')
+        analysisData.findings.map((f) => `- ${f.label} (${f.severity})`).join('\n')
       );
     }
-  }
-  if (patientId && global.patientTreatmentPlans[patientId]) {
-    const plan = global.patientTreatmentPlans[patientId];
-    if (plan.steps && plan.steps.length) {
+
+    // Get latest treatment plan
+    const { data: planData } = await supabaseAdmin
+      .from('treatment_plans')
+      .select('steps')
+      .eq('patient_id', patientId)
+      .eq('company_id', req.companyId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (planData && Array.isArray(planData.steps) && planData.steps.length) {
       ctxParts.push(
         'Active treatment plan steps:\n' +
-          plan.steps.map((s) => `- ${s.step}: ${s.description}`).join('\n')
+        planData.steps.map((s) => `- ${s.step}: ${s.description}`).join('\n')
       );
     }
   }
@@ -359,15 +430,6 @@ router.post('/chat', async (req, res) => {
       source: 'error',
     });
   }
-});
-
-// ---------- Scan image passthrough (legacy path) ----------
-router.get('/scan/:scanId', (req, res) => {
-  const scan = store.getScan(req.params.scanId);
-  if (scan && scan.filePath && fs.existsSync(scan.filePath)) {
-    return res.sendFile(path.resolve(scan.filePath));
-  }
-  res.status(404).json({ error: 'Scan not found' });
 });
 
 module.exports = router;

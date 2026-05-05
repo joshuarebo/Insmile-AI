@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { supabase } from '../lib/supabase';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001/api';
 
@@ -9,25 +10,13 @@ const api = axios.create({
   },
 });
 
-// Add token to requests if available
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
+api.interceptors.request.use(async (config) => {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (session?.access_token) {
+    config.headers.Authorization = `Bearer ${session.access_token}`;
   }
   return config;
 });
-
-export const auth = {
-  login: async (email: string, password: string) => {
-    const response = await api.post('/auth/login', { email, password });
-    return response.data;
-  },
-  signup: async (email: string, password: string, role: string) => {
-    const response = await api.post('/auth/signup', { email, password, role });
-    return response.data;
-  },
-};
 
 export const patients = {
   getAll: async () => {
@@ -38,11 +27,11 @@ export const patients = {
     const response = await api.get(`/patients/${id}`);
     return response.data;
   },
-  create: async (data: { name: string; email: string; phone: string; dateOfBirth: string }) => {
+  create: async (data: { full_name: string; email?: string; phone?: string; date_of_birth?: string; [key: string]: unknown }) => {
     const response = await api.post('/patients', data);
     return response.data;
   },
-  update: async (id: string, data: Partial<{ name: string; email: string; phone: string; dateOfBirth: string }>) => {
+  update: async (id: string, data: Record<string, unknown>) => {
     const response = await api.put(`/patients/${id}`, data);
     return response.data;
   },
@@ -56,26 +45,36 @@ export const scans = {
     const response = await api.get('/scans');
     return response.data;
   },
+  getByPatient: async (patientId: string) => {
+    const response = await api.get(`/scans/patient/${patientId}`);
+    return response.data;
+  },
   getById: async (id: string) => {
     const response = await api.get(`/scans/${id}`);
     return response.data;
   },
-  upload: async (patientId: string, file: File) => {
+  upload: async (patientId: string, file: File, scanType = 'xray') => {
     const formData = new FormData();
     formData.append('scan', file);
     formData.append('patientId', patientId);
+    formData.append('scanType', scanType);
     const response = await api.post('/scans/upload', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
+      headers: { 'Content-Type': 'multipart/form-data' },
     });
-    return response.data;
-  },
-  analyze: async (id: string) => {
-    const response = await api.post(`/scans/${id}/analyze`);
     return response.data;
   },
   delete: async (id: string) => {
     await api.delete(`/scans/${id}`);
   },
-}; 
+};
+
+export const team = {
+  getAll: async () => {
+    const response = await api.get('/auth/team');
+    return response.data;
+  },
+  invite: async (email: string, role: string) => {
+    const response = await api.post('/auth/invite', { email, role });
+    return response.data;
+  },
+};

@@ -18,11 +18,8 @@ import PeopleOutlineIcon from '@mui/icons-material/PeopleOutline';
 import MedicalInformationOutlinedIcon from '@mui/icons-material/MedicalInformationOutlined';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import LogoutOutlinedIcon from '@mui/icons-material/LogoutOutlined';
-import { HealthStatus } from '../services/ai';
-
-interface Props {
-  health?: HealthStatus | null;
-}
+import { useAuth } from '../contexts/AuthContext';
+import { getHealth, HealthStatus } from '../services/ai';
 
 const navItems = [
   { to: '/', label: 'Dashboard', icon: <HomeOutlinedIcon fontSize="small" /> },
@@ -31,27 +28,25 @@ const navItems = [
   { to: '/ai', label: 'AI workspace', icon: <AutoAwesomeIcon fontSize="small" />, highlight: true },
 ];
 
-const Layout: React.FC<Props> = ({ health }) => {
-  const [user, setUser] = useState<{ name?: string; email?: string } | null>(null);
+const Layout: React.FC = () => {
+  const { profile, signOut } = useAuth();
+  const [health, setHealth] = useState<HealthStatus | null>(null);
   const navigate = useNavigate();
   const location = useLocation();
 
   useEffect(() => {
-    const raw = localStorage.getItem('user');
-    if (raw) {
-      try {
-        setUser(JSON.parse(raw));
-      } catch (_) {}
-    }
+    const check = async () => setHealth(await getHealth());
+    check();
+    const id = setInterval(check, 30000);
+    return () => clearInterval(id);
   }, []);
 
   const isActive = (to: string) =>
     to === '/' ? location.pathname === '/' : location.pathname.startsWith(to);
 
-  const handleLogout = () => {
-    localStorage.removeItem('isLoggedIn');
-    localStorage.removeItem('user');
-    navigate('/login');
+  const handleLogout = async () => {
+    await signOut();
+    navigate('/auth/signin');
   };
 
   const aiReady = health?.aiAvailable;
@@ -72,15 +67,16 @@ const Layout: React.FC<Props> = ({ health }) => {
                   width: 36,
                   height: 36,
                   borderRadius: 2,
-                  background: 'linear-gradient(135deg,#2563eb,#0ea5e9)',
+                  background: 'linear-gradient(135deg,#0284c7,#38bdf8)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   color: 'white',
                   fontWeight: 800,
+                  fontSize: '0.75rem',
                 }}
               >
-                IA
+                In
               </Box>
               <Box>
                 <Typography variant="subtitle1" fontWeight={700} lineHeight={1}>
@@ -127,8 +123,8 @@ const Layout: React.FC<Props> = ({ health }) => {
                   variant={aiReady ? 'filled' : 'outlined'}
                 />
               </Tooltip>
-              <Avatar sx={{ width: 32, height: 32, bgcolor: 'primary.main' }}>
-                {(user?.name || user?.email || 'U').slice(0, 1).toUpperCase()}
+              <Avatar sx={{ width: 32, height: 32, bgcolor: 'primary.main', fontSize: '0.875rem' }}>
+                {(profile?.full_name || 'U').slice(0, 1).toUpperCase()}
               </Avatar>
               <Tooltip title="Logout">
                 <IconButton onClick={handleLogout}>
