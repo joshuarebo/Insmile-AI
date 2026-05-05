@@ -16,7 +16,7 @@ const Patients = () => {
   const navigate = useNavigate();
   const [apiError, setApiError] = useState<string | null>(null);
 
-  const { data: patientList = [], isError } = useQuery({
+  const { data: patientList = [] } = useQuery({
     queryKey: ['patients'],
     queryFn: async () => {
       try {
