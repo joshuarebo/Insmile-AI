@@ -61,12 +61,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }, []);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session: s } }) => {
-      setSession(s);
-      setUser(s?.user ?? null);
-      if (s?.user) fetchProfile(s.user.id);
-      setLoading(false);
-    });
+    // Check if URL contains auth callback tokens (after email verification redirect)
+    const hasAuthCallback = window.location.hash.includes('access_token') ||
+      window.location.search.includes('code=');
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
       setSession(s);
@@ -77,7 +74,25 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setProfile(null);
         setCompany(null);
       }
+      setLoading(false);
     });
+
+    // If no auth callback in URL, check existing session immediately
+    if (!hasAuthCallback) {
+      supabase.auth.getSession().then(({ data: { session: s } }) => {
+        setSession(s);
+        setUser(s?.user ?? null);
+        if (s?.user) fetchProfile(s.user.id);
+        setLoading(false);
+      });
+    } else {
+      // Safety timeout: don't leave app loading forever if callback fails
+      const timeout = setTimeout(() => setLoading(false), 5000);
+      return () => {
+        clearTimeout(timeout);
+        subscription.unsubscribe();
+      };
+    }
 
     return () => subscription.unsubscribe();
   }, [fetchProfile]);
