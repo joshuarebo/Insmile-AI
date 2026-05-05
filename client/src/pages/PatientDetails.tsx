@@ -1,27 +1,39 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import axios from 'axios';
-import { Tabs, Tab, Box, Typography, Button, Card, CardContent, CircularProgress, Alert } from '@mui/material';
+import { Tabs, Tab, Box, Typography, Button, Card, CardContent, CircularProgress, Alert, Stack } from '@mui/material';
 import { ScanUploader } from '../components/ScanUploader';
 import AIAnalysis from '../components/AIAnalysis';
 import ChatAssistant from '../components/ChatAssistant';
 import { TreatmentPlan } from '../components/TreatmentPlan';
 import { API_BASE_URL } from '../services/ai';
+import { ScanThumbnail } from '../components/ScanThumbnail';
 
 interface Patient {
   id: string;
-  name: string;
+  full_name: string;
   email: string;
   phone: string;
-  dateOfBirth: string;
+  date_of_birth: string;
+  gender: string;
+  sha_number: string;
+  nhif_number: string;
+  insurance_provider: string;
+  insurance_member_number: string;
+  preferred_language: string;
+  national_id: string;
+  allergies: string[];
+  medical_history: string;
+  medications: string[];
+  notes: string;
 }
 
 interface Scan {
   id: string;
-  patientId: string;
-  createdAt: string;
-  fileName?: string;
-  status?: string;
+  patient_id: string;
+  created_at: string;
+  file_name?: string;
+  scan_type?: string;
 }
 
 const PatientDetails = () => {
@@ -122,29 +134,98 @@ const PatientDetails = () => {
   return (
     <div className="container mx-auto px-4 py-8">
       <Box mb={4} display="flex" justifyContent="space-between" alignItems="center">
-        <Typography variant="h4">{patient.name}</Typography>
-        <Button component={Link} to="/patients" variant="outlined">
-          Back to Patients
-        </Button>
+        <Typography variant="h4">{patient.full_name}</Typography>
+        <Stack direction="row" spacing={1}>
+          <Button component={Link} to={`/patients/${id}/edit`} variant="contained" size="small">
+            Edit Patient
+          </Button>
+          <Button component={Link} to="/patients" variant="outlined" size="small">
+            Back to Patients
+          </Button>
+        </Stack>
       </Box>
-      
+
       <Card sx={{ mb: 4 }}>
         <CardContent>
           <Typography variant="h6" gutterBottom>Patient Information</Typography>
-          <Box display="grid" gridTemplateColumns={{ xs: '1fr', md: '1fr 1fr' }} gap={2}>
-            <div>
-              <Typography variant="subtitle2" color="text.secondary">Email</Typography>
-              <Typography>{patient.email}</Typography>
-            </div>
+          <Box display="grid" gridTemplateColumns={{ xs: '1fr', md: '1fr 1fr 1fr' }} gap={2}>
             <div>
               <Typography variant="subtitle2" color="text.secondary">Phone</Typography>
-              <Typography>{patient.phone}</Typography>
+              <Typography>{patient.phone || '—'}</Typography>
+            </div>
+            <div>
+              <Typography variant="subtitle2" color="text.secondary">Email</Typography>
+              <Typography>{patient.email || '—'}</Typography>
             </div>
             <div>
               <Typography variant="subtitle2" color="text.secondary">Date of Birth</Typography>
-              <Typography>{new Date(patient.dateOfBirth).toLocaleDateString()}</Typography>
+              <Typography>{patient.date_of_birth ? new Date(patient.date_of_birth).toLocaleDateString() : '—'}</Typography>
+            </div>
+            <div>
+              <Typography variant="subtitle2" color="text.secondary">Gender</Typography>
+              <Typography sx={{ textTransform: 'capitalize' }}>{patient.gender || '—'}</Typography>
+            </div>
+            <div>
+              <Typography variant="subtitle2" color="text.secondary">Language</Typography>
+              <Typography>{patient.preferred_language === 'sw' ? 'Kiswahili' : 'English'}</Typography>
+            </div>
+            <div>
+              <Typography variant="subtitle2" color="text.secondary">National ID</Typography>
+              <Typography>{patient.national_id || '—'}</Typography>
             </div>
           </Box>
+
+          {(patient.sha_number || patient.nhif_number || patient.insurance_provider) && (
+            <Box sx={{ mt: 3 }}>
+              <Typography variant="subtitle1" fontWeight={600} gutterBottom>Insurance</Typography>
+              <Box display="grid" gridTemplateColumns={{ xs: '1fr', md: '1fr 1fr' }} gap={2}>
+                {patient.sha_number && (
+                  <div>
+                    <Typography variant="subtitle2" color="text.secondary">SHA Number</Typography>
+                    <Typography>{patient.sha_number}</Typography>
+                  </div>
+                )}
+                {patient.nhif_number && (
+                  <div>
+                    <Typography variant="subtitle2" color="text.secondary">NHIF Number</Typography>
+                    <Typography>{patient.nhif_number}</Typography>
+                  </div>
+                )}
+                {patient.insurance_provider && (
+                  <div>
+                    <Typography variant="subtitle2" color="text.secondary">Provider</Typography>
+                    <Typography>{patient.insurance_provider}</Typography>
+                  </div>
+                )}
+                {patient.insurance_member_number && (
+                  <div>
+                    <Typography variant="subtitle2" color="text.secondary">Member Number</Typography>
+                    <Typography>{patient.insurance_member_number}</Typography>
+                  </div>
+                )}
+              </Box>
+            </Box>
+          )}
+
+          {(patient.allergies?.length > 0 || patient.medications?.length > 0) && (
+            <Box sx={{ mt: 3 }}>
+              <Typography variant="subtitle1" fontWeight={600} gutterBottom>Medical</Typography>
+              <Box display="grid" gridTemplateColumns={{ xs: '1fr', md: '1fr 1fr' }} gap={2}>
+                {patient.allergies?.length > 0 && (
+                  <div>
+                    <Typography variant="subtitle2" color="text.secondary">Allergies</Typography>
+                    <Typography>{patient.allergies.join(', ')}</Typography>
+                  </div>
+                )}
+                {patient.medications?.length > 0 && (
+                  <div>
+                    <Typography variant="subtitle2" color="text.secondary">Medications</Typography>
+                    <Typography>{patient.medications.join(', ')}</Typography>
+                  </div>
+                )}
+              </Box>
+            </Box>
+          )}
         </CardContent>
       </Card>
 
@@ -185,17 +266,10 @@ const PatientDetails = () => {
                 >
                   <CardContent>
                     <Typography variant="body2" color="text.secondary">
-                      {new Date(scan.createdAt).toLocaleString()}
+                      {new Date(scan.created_at).toLocaleString()}
                     </Typography>
                     <Box sx={{ mt: 2, textAlign: 'center' }}>
-                      <img 
-                        src={`${API_BASE_URL}/scans/${scan.id}/image`}
-                        alt="Dental scan" 
-                        style={{ maxHeight: 150, maxWidth: '100%', objectFit: 'contain' }}
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).src = '/placeholder-scan.jpg';
-                        }}
-                      />
+                      <ScanThumbnail scanId={scan.id} />
                     </Box>
                     <Button 
                       variant="contained" 

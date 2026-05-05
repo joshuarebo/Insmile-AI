@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import {
   Alert,
+  Autocomplete,
   Box,
   Card,
   Chip,
   Stack,
   Tab,
   Tabs,
+  TextField,
   Typography,
 } from '@mui/material';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
@@ -15,13 +17,19 @@ import AIAnalysis from '../components/AIAnalysis';
 import { TreatmentPlan } from '../components/TreatmentPlan';
 import ChatAssistant from '../components/ChatAssistant';
 import { getHealth, HealthStatus } from '../services/ai';
+import { patients } from '../services/api';
 
-const DEMO_PATIENT = 'demo-patient';
+interface PatientOption {
+  id: string;
+  full_name: string;
+}
 
 const AIDashboard: React.FC = () => {
   const [tab, setTab] = useState(0);
   const [scanId, setScanId] = useState<string | null>(null);
   const [health, setHealth] = useState<HealthStatus | null>(null);
+  const [patientList, setPatientList] = useState<PatientOption[]>([]);
+  const [selectedPatient, setSelectedPatient] = useState<PatientOption | null>(null);
 
   useEffect(() => {
     const check = async () => setHealth(await getHealth());
@@ -30,12 +38,17 @@ const AIDashboard: React.FC = () => {
     return () => clearInterval(id);
   }, []);
 
+  useEffect(() => {
+    patients.getAll().then((list: PatientOption[]) => setPatientList(list)).catch(() => {});
+  }, []);
+
   const handleUploaded = (id: string) => {
     setScanId(id);
     setTab(1);
   };
 
   const aiReady = health && health.aiAvailable;
+  const patientId = selectedPatient?.id || null;
 
   return (
     <Box>
@@ -73,29 +86,52 @@ const AIDashboard: React.FC = () => {
         </Alert>
       )}
 
-      <Card variant="outlined" sx={{ borderRadius: 3, mb: 2 }}>
-        <Tabs
-          value={tab}
-          onChange={(_, v) => setTab(v)}
-          sx={{ px: 2, borderBottom: 1, borderColor: 'divider' }}
-        >
-          <Tab label="1 · Upload" />
-          <Tab label="2 · Analysis" disabled={!scanId} />
-          <Tab label="3 · Treatment plan" disabled={!scanId} />
-          <Tab label="4 · Chat" />
-        </Tabs>
+      <Card variant="outlined" sx={{ borderRadius: 3, mb: 2, p: 2 }}>
+        <Autocomplete
+          options={patientList}
+          getOptionLabel={(o) => o.full_name}
+          value={selectedPatient}
+          onChange={(_, v) => { setSelectedPatient(v); setScanId(null); setTab(0); }}
+          renderInput={(params) => (
+            <TextField {...params} label="Select patient" size="small" placeholder="Search patients…" />
+          )}
+          sx={{ maxWidth: 400 }}
+        />
       </Card>
 
-      {tab === 0 && (
-        <ScanUploader patientId={DEMO_PATIENT} onScanUploaded={handleUploaded} />
+      {!patientId && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          Select a patient above to upload scans and run AI analysis.
+        </Alert>
       )}
-      {tab === 1 && scanId && (
-        <AIAnalysis scanId={scanId} patientId={DEMO_PATIENT} />
+
+      {patientId && (
+        <>
+          <Card variant="outlined" sx={{ borderRadius: 3, mb: 2 }}>
+            <Tabs
+              value={tab}
+              onChange={(_, v) => setTab(v)}
+              sx={{ px: 2, borderBottom: 1, borderColor: 'divider' }}
+            >
+              <Tab label="1 · Upload" />
+              <Tab label="2 · Analysis" disabled={!scanId} />
+              <Tab label="3 · Treatment plan" disabled={!scanId} />
+              <Tab label="4 · Chat" />
+            </Tabs>
+          </Card>
+
+          {tab === 0 && (
+            <ScanUploader patientId={patientId} onScanUploaded={handleUploaded} />
+          )}
+          {tab === 1 && scanId && (
+            <AIAnalysis scanId={scanId} patientId={patientId} />
+          )}
+          {tab === 2 && scanId && (
+            <TreatmentPlan patientId={patientId} scanId={scanId} />
+          )}
+          {tab === 3 && <ChatAssistant patientId={patientId} />}
+        </>
       )}
-      {tab === 2 && scanId && (
-        <TreatmentPlan patientId={DEMO_PATIENT} scanId={scanId} />
-      )}
-      {tab === 3 && <ChatAssistant patientId={DEMO_PATIENT} />}
     </Box>
   );
 };

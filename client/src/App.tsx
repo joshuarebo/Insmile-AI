@@ -8,6 +8,7 @@ import Dashboard from './pages/Dashboard';
 import Patients from './pages/Patients';
 import PatientDetails from './pages/PatientDetails';
 import AddPatient from './pages/AddPatient';
+import EditPatient from './pages/EditPatient';
 import Scans from './pages/Scans';
 import ScanDetails from './pages/ScanDetails';
 import AIDashboard from './pages/AIDashboard';
@@ -80,6 +81,7 @@ function AppRoutes() {
         <Route path="patients" element={<Patients />} />
         <Route path="patients/add" element={<AddPatient />} />
         <Route path="patients/:id" element={<PatientDetails />} />
+        <Route path="patients/:id/edit" element={<EditPatient />} />
         <Route path="scans" element={<Scans />} />
         <Route path="scans/:id" element={<ScanDetails />} />
         <Route path="ai" element={<AIDashboard />} />

@@ -139,7 +139,7 @@ const PatientForm: React.FC = () => {
             </Stack>
 
             <Typography variant="subtitle2" color="text.secondary" sx={{ mt: 2 }}>
-              Insurance Details
+              Insurance Details (all optional — fill whichever applies)
             </Typography>
 
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
@@ -150,6 +150,7 @@ const PatientForm: React.FC = () => {
                 onChange={handleChange}
                 fullWidth
                 size="small"
+                helperText="Social Health Authority number"
               />
               <TextField
                 label="NHIF Number (legacy)"
@@ -158,21 +159,23 @@ const PatientForm: React.FC = () => {
                 onChange={handleChange}
                 fullWidth
                 size="small"
+                helperText="Old NHIF card — still accepted by some providers"
               />
             </Stack>
 
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
               <TextField
-                label="Other Insurance Provider"
+                label="Private Insurance Provider"
                 name="insurance_provider"
                 value={formData.insurance_provider}
                 onChange={handleChange}
                 fullWidth
                 size="small"
-                placeholder="e.g., Jubilee, AAR, Britam"
+                placeholder="e.g., Jubilee, AAR, Britam, Madison, CIC, GA"
+                helperText="For patients with private cover"
               />
               <TextField
-                label="Insurance Member Number"
+                label="Member / Policy Number"
                 name="insurance_member_number"
                 value={formData.insurance_member_number}
                 onChange={handleChange}

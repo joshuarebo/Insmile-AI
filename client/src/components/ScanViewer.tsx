@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Typography, Chip, Stack, CircularProgress, ToggleButton, ToggleButtonGroup } from '@mui/material';
-import { Finding, scanImageUrl } from '../services/ai';
+import { Finding, API_BASE_URL } from '../services/ai';
+import { getToken } from '../lib/tokenManager';
 
 interface ScanViewerProps {
   scanId: string;
@@ -39,7 +40,34 @@ export const ScanViewer: React.FC<ScanViewerProps> = ({
       setLoading(false);
       return;
     }
-    setImageUrl(scanImageUrl(scanId));
+
+    let cancelled = false;
+    const fetchImage = async () => {
+      try {
+        const token = getToken();
+        const res = await fetch(`${API_BASE_URL}/scans/${scanId}/image`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          redirect: 'follow',
+        });
+        if (!res.ok) throw new Error('Failed to load');
+        const blob = await res.blob();
+        if (!cancelled) {
+          setImageUrl(URL.createObjectURL(blob));
+        }
+      } catch {
+        if (!cancelled) {
+          setError('Unable to load scan image. The file may still be uploading or was removed.');
+          setLoading(false);
+        }
+      }
+    };
+    fetchImage();
+
+    return () => {
+      cancelled = true;
+      if (imageUrl) URL.revokeObjectURL(imageUrl);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scanId]);
 
   const handleLoad = () => {
@@ -120,12 +148,14 @@ export const ScanViewer: React.FC<ScanViewerProps> = ({
               }}
             />
             {imageDims &&
-              filtered.map((f) => {
+              filtered.map((f, idx) => {
                 const bbox = f.bbox_norm;
                 if (!bbox) return null;
                 const [x, y, w, h] = bbox;
                 const color = SEVERITY_COLOR[f.severity] || '#6b7280';
                 const isSelected = selectedIndex === f._i;
+                // Stagger labels so overlapping boxes don't collide
+                const labelOffset = -22 - (idx % 3) * 18;
                 return (
                   <Box
                     key={f._i}
@@ -139,30 +169,34 @@ export const ScanViewer: React.FC<ScanViewerProps> = ({
                       border: `2px solid ${color}`,
                       borderRadius: 1,
                       boxShadow: isSelected ? `0 0 0 3px ${color}55` : 'none',
-                      transition: 'box-shadow 120ms',
+                      transition: 'box-shadow 120ms, opacity 120ms',
                       cursor: onSelectFinding ? 'pointer' : 'default',
                       backgroundColor: isSelected ? `${color}22` : 'transparent',
+                      opacity: selectedIndex !== null && !isSelected ? 0.4 : 1,
+                      zIndex: isSelected ? 10 : 1,
                     }}
                   >
                     <Box
                       sx={{
                         position: 'absolute',
-                        top: '-22px',
+                        top: `${labelOffset}px`,
                         left: 0,
                         bgcolor: color,
                         color: 'white',
-                        fontSize: 11,
+                        fontSize: 10,
                         fontWeight: 600,
                         px: 0.75,
                         py: 0.25,
                         borderRadius: '4px 4px 4px 0',
                         whiteSpace: 'nowrap',
-                        maxWidth: 260,
+                        maxWidth: 200,
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
+                        opacity: isSelected || selectedIndex === null ? 1 : 0.5,
+                        pointerEvents: 'none',
                       }}
                     >
-                      {f.tooth ? `#${f.tooth} — ` : ''}
+                      {f.tooth ? `#${f.tooth} ` : ''}
                       {f.label}
                     </Box>
                   </Box>

@@ -6,18 +6,11 @@ import { Alert } from '@mui/material';
 
 interface Patient {
   id: string;
-  name: string;
+  full_name: string;
   email: string;
   phone: string;
-  dateOfBirth: string;
+  date_of_birth: string;
 }
-
-// Mock patients for demo when API fails
-const MOCK_PATIENTS = [
-  { id: 'mock1', name: 'John Doe', email: 'john@example.com', phone: '555-123-4567', dateOfBirth: '1980-01-01' },
-  { id: 'mock2', name: 'Jane Smith', email: 'jane@example.com', phone: '555-987-6543', dateOfBirth: '1985-05-15' },
-  { id: 'mock3', name: 'Sam Wilson', email: 'sam@example.com', phone: '555-456-7890', dateOfBirth: '1978-11-22' },
-];
 
 const Patients = () => {
   const navigate = useNavigate();
@@ -36,13 +29,12 @@ const Patients = () => {
     retry: 1,
   });
 
-  // Use mock data if API fails
-  const displayPatients = isError ? MOCK_PATIENTS : patientList as Patient[];
+  const displayPatients = patientList as Patient[];
 
   return (
     <div>
       <div className="flex justify-between items-center mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">Patients {isError && "(Demo Mode)"}</h1>
+        <h1 className="text-3xl font-bold text-gray-900">Patients</h1>
         <button
           onClick={() => navigate('/patients/add')}
           className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
@@ -53,7 +45,7 @@ const Patients = () => {
 
       {apiError && (
         <Alert severity="warning" sx={{ mb: 4 }}>
-          {apiError} - Showing demo data.
+          {apiError}
         </Alert>
       )}
 
@@ -71,7 +63,7 @@ const Patients = () => {
                     <div className="flex items-center justify-between">
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-blue-600 truncate">
-                          {patient.name}
+                          {patient.full_name}
                         </p>
                         <p className="mt-1 text-sm text-gray-500">
                           {patient.email}
