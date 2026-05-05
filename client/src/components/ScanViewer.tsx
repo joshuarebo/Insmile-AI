@@ -18,6 +18,16 @@ const SEVERITY_COLOR: Record<string, string> = {
 
 type SeverityFilter = 'all' | 'severe' | 'moderate' | 'mild';
 
+async function fetchSignedUrl(scanId: string): Promise<string | null> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE_URL}/scans/${scanId}/image`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data.url || null;
+}
+
 export const ScanViewer: React.FC<ScanViewerProps> = ({
   scanId,
   findings = [],
@@ -35,39 +45,31 @@ export const ScanViewer: React.FC<ScanViewerProps> = ({
   useEffect(() => {
     setLoading(true);
     setError(null);
+    setImageUrl(null);
+    setImageDims(null);
+
     if (!scanId) {
-      setImageUrl(null);
       setLoading(false);
       return;
     }
 
     let cancelled = false;
-    const fetchImage = async () => {
-      try {
-        const token = getToken();
-        const res = await fetch(`${API_BASE_URL}/scans/${scanId}/image`, {
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-          redirect: 'follow',
-        });
-        if (!res.ok) throw new Error('Failed to load');
-        const blob = await res.blob();
-        if (!cancelled) {
-          setImageUrl(URL.createObjectURL(blob));
-        }
-      } catch {
-        if (!cancelled) {
-          setError('Unable to load scan image. The file may still be uploading or was removed.');
-          setLoading(false);
-        }
+    fetchSignedUrl(scanId).then((url) => {
+      if (cancelled) return;
+      if (url) {
+        setImageUrl(url);
+      } else {
+        setError('Unable to load scan image. The file may still be uploading or was removed.');
+        setLoading(false);
       }
-    };
-    fetchImage();
+    }).catch(() => {
+      if (!cancelled) {
+        setError('Unable to load scan image.');
+        setLoading(false);
+      }
+    });
 
-    return () => {
-      cancelled = true;
-      if (imageUrl) URL.revokeObjectURL(imageUrl);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => { cancelled = true; };
   }, [scanId]);
 
   const handleLoad = () => {
@@ -127,7 +129,7 @@ export const ScanViewer: React.FC<ScanViewerProps> = ({
             <CircularProgress sx={{ color: 'white' }} />
           </Box>
         )}
-        {error && (
+        {error && !imageUrl && (
           <Typography color="#f87171" sx={{ p: 3, textAlign: 'center' }}>
             {error}
           </Typography>
@@ -140,6 +142,7 @@ export const ScanViewer: React.FC<ScanViewerProps> = ({
               onLoad={handleLoad}
               onError={handleError}
               alt="Dental scan"
+              crossOrigin="anonymous"
               style={{
                 maxWidth: '100%',
                 maxHeight: 520,
@@ -154,7 +157,6 @@ export const ScanViewer: React.FC<ScanViewerProps> = ({
                 const [x, y, w, h] = bbox;
                 const color = SEVERITY_COLOR[f.severity] || '#6b7280';
                 const isSelected = selectedIndex === f._i;
-                // Stagger labels so overlapping boxes don't collide
                 const labelOffset = -22 - (idx % 3) * 18;
                 return (
                   <Box

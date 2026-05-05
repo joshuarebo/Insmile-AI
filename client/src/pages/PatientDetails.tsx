@@ -255,26 +255,34 @@ const PatientDetails = () => {
           ) : (
             <Box display="grid" gridTemplateColumns={{ xs: '1fr', sm: '1fr 1fr', md: '1fr 1fr 1fr' }} gap={2}>
               {scans.map(scan => (
-                <Card 
-                  key={scan.id} 
-                  variant="outlined" 
-                  sx={{ 
+                <Card
+                  key={scan.id}
+                  variant="outlined"
+                  sx={{
                     cursor: 'pointer',
-                    border: selectedScanId === (scan.id) ? '2px solid #1976d2' : undefined
+                    border: selectedScanId === scan.id ? '2px solid #1976d2' : undefined,
+                    minHeight: 220,
                   }}
                   onClick={() => handleScanSelect(scan.id)}
                 >
                   <CardContent>
-                    <Typography variant="body2" color="text.secondary">
-                      {new Date(scan.created_at).toLocaleString()}
-                    </Typography>
-                    <Box sx={{ mt: 2, textAlign: 'center' }}>
-                      <ScanThumbnail scanId={scan.id} />
+                    <Stack direction="row" justifyContent="space-between" alignItems="center">
+                      <Typography variant="body2" color="text.secondary">
+                        {scan.created_at ? new Date(scan.created_at).toLocaleDateString() : 'Unknown date'}
+                      </Typography>
+                      {scan.scan_type && scan.scan_type !== 'unknown' && (
+                        <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'uppercase' }}>
+                          {scan.scan_type}
+                        </Typography>
+                      )}
+                    </Stack>
+                    <Box sx={{ mt: 2, textAlign: 'center', height: 120, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <ScanThumbnail scanId={scan.id} maxHeight={120} />
                     </Box>
-                    <Button 
-                      variant="contained" 
-                      size="small" 
-                      fullWidth 
+                    <Button
+                      variant="contained"
+                      size="small"
+                      fullWidth
                       sx={{ mt: 2 }}
                       onClick={(e) => {
                         e.stopPropagation();

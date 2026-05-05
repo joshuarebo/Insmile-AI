@@ -19,23 +19,18 @@ export const ScanThumbnail: React.FC<Props> = ({ scanId, maxHeight = 150 }) => {
         const token = getToken();
         const res = await fetch(`${API_BASE_URL}/scans/${scanId}/image`, {
           headers: token ? { Authorization: `Bearer ${token}` } : {},
-          redirect: 'follow',
         });
         if (!res.ok) throw new Error('load failed');
-        const blob = await res.blob();
-        if (!cancelled) setUrl(URL.createObjectURL(blob));
+        const data = await res.json();
+        if (!cancelled && data.url) setUrl(data.url);
       } catch {
-        // silently fail — show nothing
+        // silently fail
       } finally {
         if (!cancelled) setLoading(false);
       }
     };
     load();
-    return () => {
-      cancelled = true;
-      if (url) URL.revokeObjectURL(url);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => { cancelled = true; };
   }, [scanId]);
 
   if (loading) {
@@ -58,6 +53,7 @@ export const ScanThumbnail: React.FC<Props> = ({ scanId, maxHeight = 150 }) => {
     <img
       src={url}
       alt="Dental scan"
+      crossOrigin="anonymous"
       style={{ maxHeight, maxWidth: '100%', objectFit: 'contain', display: 'block', margin: '0 auto' }}
     />
   );

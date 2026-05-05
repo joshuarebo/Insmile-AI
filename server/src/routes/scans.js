@@ -87,7 +87,7 @@ router.get('/:id/image', async (req, res) => {
       return res.status(404).json({ message: 'Scan image not found' });
     }
 
-    res.redirect(signedUrl.signedUrl);
+    res.json({ url: signedUrl.signedUrl });
   } catch (err) {
     console.error('Error fetching scan image:', err);
     res.status(500).json({ message: 'Failed to fetch scan image' });

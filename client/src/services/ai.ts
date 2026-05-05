@@ -183,3 +183,12 @@ export async function sendChatMessage(
 export function scanImageUrl(scanId: string) {
   return `${API_BASE_URL}/scans/${scanId}/image`;
 }
+
+export async function getScanSignedUrl(scanId: string): Promise<string | null> {
+  try {
+    const { data } = await axios.get(`${API_BASE_URL}/scans/${scanId}/image`);
+    return data.url || null;
+  } catch {
+    return null;
+  }
+}
