@@ -45,6 +45,7 @@ app.get('/api/health', (req, res) => {
     realTimeAvailable: isConfigured(),
     region: 'Kenya',
     database: 'supabase',
+    supabaseConfigured: !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY),
   });
 });
 
