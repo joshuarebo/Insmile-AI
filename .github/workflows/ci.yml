@@ -64,4 +64,6 @@ jobs:
         env:
           OPENROUTER_API_KEY: ci-dummy
           GOOGLE_AI_API_KEY: ci-dummy
-          JWT_SECRET: ci-dummy
+          SUPABASE_URL: https://ci-dummy.supabase.co
+          SUPABASE_ANON_KEY: ci-dummy
+          SUPABASE_SERVICE_ROLE_KEY: ci-dummy

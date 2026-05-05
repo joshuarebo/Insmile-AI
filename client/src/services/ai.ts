@@ -1,9 +1,19 @@
 import axios from 'axios';
+import { supabase } from '../lib/supabase';
 
 export const API_BASE_URL =
   (process.env.REACT_APP_API_URL as string | undefined) || 'http://localhost:3001/api';
 
 axios.defaults.timeout = 60000;
+
+// Inject auth token into every request
+axios.interceptors.request.use(async (config) => {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (session?.access_token) {
+    config.headers.Authorization = `Bearer ${session.access_token}`;
+  }
+  return config;
+});
 
 export interface Finding {
   label: string;

@@ -1,8 +1,9 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
 
-import Login from './pages/Login';
+import SignIn from './pages/auth/SignIn';
+import SignUp from './pages/auth/SignUp';
+import VerifyEmail from './pages/auth/VerifyEmail';
 import Dashboard from './pages/Dashboard';
 import Patients from './pages/Patients';
 import PatientDetails from './pages/PatientDetails';
@@ -13,9 +14,9 @@ import AIDashboard from './pages/AIDashboard';
 
 import Layout from './components/Layout';
 import { ThemeProviderWrapper } from './contexts/ThemeContext';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { NotificationProvider } from './components/common/NotificationSystem';
-import { getHealth, HealthStatus } from './services/ai';
-import { Box, Typography, Button, CircularProgress } from '@mui/material';
+import { Box, CircularProgress, Typography } from '@mui/material';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -25,129 +26,81 @@ const queryClient = new QueryClient({
 });
 
 const PrivateRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const isAuthenticated = localStorage.getItem('isLoggedIn') === 'true';
-  return isAuthenticated ? <>{children}</> : <Navigate to="/login" />;
-};
-
-function App() {
-  const [health, setHealth] = useState<HealthStatus | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let mounted = true;
-    const check = async () => {
-      const h = await getHealth();
-      if (mounted) {
-        setHealth(h);
-        setLoading(false);
-      }
-    };
-    check();
-    const id = setInterval(check, 30000);
-    return () => {
-      mounted = false;
-      clearInterval(id);
-    };
-  }, []);
+  const { user, loading } = useAuth();
 
   if (loading) {
     return (
-      <ThemeProviderWrapper>
-        <Box
-          sx={{
-            minHeight: '100vh',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 2,
-          }}
-        >
-          <CircularProgress />
-          <Typography variant="body2" color="text.secondary">
-            Connecting to Insmile AI…
-          </Typography>
-        </Box>
-      </ThemeProviderWrapper>
+      <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <CircularProgress />
+      </Box>
     );
   }
 
-  const serverUp = Boolean(health);
+  return user ? <>{children}</> : <Navigate to="/auth/signin" />;
+};
 
+const PublicRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  return user ? <Navigate to="/" /> : <>{children}</>;
+};
+
+function AppRoutes() {
+  const { loading } = useAuth();
+
+  if (loading) {
+    return (
+      <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2 }}>
+        <CircularProgress />
+        <Typography variant="body2" color="text.secondary">
+          Loading Insmile AI…
+        </Typography>
+      </Box>
+    );
+  }
+
+  return (
+    <Routes>
+      {/* Auth routes */}
+      <Route path="/auth/signin" element={<PublicRoute><SignIn /></PublicRoute>} />
+      <Route path="/auth/signup" element={<PublicRoute><SignUp /></PublicRoute>} />
+      <Route path="/auth/verify" element={<VerifyEmail />} />
+
+      {/* Protected routes */}
+      <Route path="/" element={<PrivateRoute><Layout /></PrivateRoute>}>
+        <Route index element={<Dashboard />} />
+        <Route path="patients" element={<Patients />} />
+        <Route path="patients/add" element={<AddPatient />} />
+        <Route path="patients/:id" element={<PatientDetails />} />
+        <Route path="scans" element={<Scans />} />
+        <Route path="scans/:id" element={<ScanDetails />} />
+        <Route path="ai" element={<AIDashboard />} />
+      </Route>
+
+      {/* Fallback */}
+      <Route path="*" element={<Navigate to="/" />} />
+    </Routes>
+  );
+}
+
+function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProviderWrapper>
         <NotificationProvider>
-          <Router>
-            {serverUp ? (
-              <Routes>
-                <Route path="/login" element={<Login />} />
-                <Route
-                  path="/"
-                  element={
-                    <PrivateRoute>
-                      <Layout health={health} />
-                    </PrivateRoute>
-                  }
-                >
-                  <Route index element={<Dashboard />} />
-                  <Route path="patients" element={<Patients />} />
-                  <Route path="patients/add" element={<AddPatient />} />
-                  <Route path="patients/:id" element={<PatientDetails />} />
-                  <Route path="scans" element={<Scans />} />
-                  <Route path="scans/:id" element={<ScanDetails />} />
-                  <Route path="ai" element={<AIDashboard />} />
-                  <Route
-                    path="*"
-                    element={
-                      <Box p={4} textAlign="center">
-                        <Typography variant="h5" gutterBottom>
-                          Page not found
-                        </Typography>
-                        <Button variant="contained" href="/">
-                          Go home
-                        </Button>
-                      </Box>
-                    }
-                  />
-                </Route>
-              </Routes>
-            ) : (
-              <Box
-                sx={{
-                  minHeight: '100vh',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  px: 3,
-                }}
-              >
-                <Box
-                  sx={{
-                    maxWidth: 520,
-                    p: 4,
-                    border: '1px solid',
-                    borderColor: 'divider',
-                    borderRadius: 3,
-                    textAlign: 'center',
-                  }}
-                >
-                  <Typography variant="h5" gutterBottom>
-                    Server not reachable
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                    Make sure the Insmile AI backend is running at{' '}
-                    <code>http://localhost:3001</code>.
-                    <br />
-                    From the repo root: <code>npm run start:server</code>.
-                  </Typography>
-                  <Button variant="contained" onClick={() => window.location.reload()}>
-                    Retry
-                  </Button>
-                </Box>
-              </Box>
-            )}
-          </Router>
+          <AuthProvider>
+            <Router>
+              <AppRoutes />
+            </Router>
+          </AuthProvider>
         </NotificationProvider>
       </ThemeProviderWrapper>
     </QueryClientProvider>
