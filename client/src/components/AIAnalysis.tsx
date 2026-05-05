@@ -229,6 +229,25 @@ const AIAnalysis: React.FC<Props> = ({ scanId, patientId, onAnalysisReady }) => 
                   bgcolor: selected === i ? 'action.selected' : 'transparent',
                 }}
               >
+                <Box
+                  sx={{
+                    width: 24,
+                    height: 24,
+                    minWidth: 24,
+                    borderRadius: '50%',
+                    bgcolor: SEV_COLOR[f.severity] || '#6b7280',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    mr: 1.5,
+                    border: selected === i ? '2px solid white' : 'none',
+                    boxShadow: selected === i ? `0 0 0 2px ${SEV_COLOR[f.severity]}` : 'none',
+                  }}
+                >
+                  <Typography sx={{ color: 'white', fontSize: 11, fontWeight: 700, lineHeight: 1 }}>
+                    {i + 1}
+                  </Typography>
+                </Box>
                 <ListItemText
                   primary={
                     <Stack direction="row" spacing={1} alignItems="center">
@@ -243,7 +262,7 @@ const AIAnalysis: React.FC<Props> = ({ scanId, patientId, onAnalysisReady }) => 
                       />
                     </Stack>
                   }
-                  secondary={`Confidence ${Math.round((f.confidence || 0) * 100)}%`}
+                  secondary={`Confidence ${Math.round((f.confidence || 0) * 100)}%${f.bbox_norm ? '' : ' · no location data'}`}
                 />
               </ListItemButton>
             ))}
