@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Typography, Chip, Stack, CircularProgress, Tooltip } from '@mui/material';
+import { Box, Typography, Chip, Stack, CircularProgress, Tooltip, IconButton } from '@mui/material';
+import VisibilityIcon from '@mui/icons-material/Visibility';
+import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
 import { Finding, API_BASE_URL } from '../services/ai';
 import { getToken } from '../lib/tokenManager';
 
@@ -37,6 +39,7 @@ export const ScanViewer: React.FC<ScanViewerProps> = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [hovered, setHovered] = useState<number | null>(null);
+  const [showMarkers, setShowMarkers] = useState(true);
   const imgRef = useRef<HTMLImageElement>(null);
 
   useEffect(() => {
@@ -88,14 +91,25 @@ export const ScanViewer: React.FC<ScanViewerProps> = ({
 
   return (
     <Box>
-      {/* Legend */}
-      <Stack direction="row" spacing={1.5} alignItems="center" sx={{ mb: 1.5 }}>
+      {/* Legend + controls */}
+      <Stack direction="row" spacing={1.5} alignItems="center" sx={{ mb: 1.5 }} flexWrap="wrap">
         <Chip size="small" label="Severe" sx={{ bgcolor: SEVERITY_COLOR.severe, color: 'white', height: 22, fontSize: 11 }} />
         <Chip size="small" label="Moderate" sx={{ bgcolor: SEVERITY_COLOR.moderate, color: 'white', height: 22, fontSize: 11 }} />
         <Chip size="small" label="Mild" sx={{ bgcolor: SEVERITY_COLOR.mild, color: 'white', height: 22, fontSize: 11 }} />
-        <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
-          Click a marker or finding to highlight
-        </Typography>
+        <Box sx={{ flex: 1 }} />
+        <Tooltip title={showMarkers ? 'Hide markers — view clean scan' : 'Show markers'} placement="top">
+          <IconButton
+            size="small"
+            onClick={() => setShowMarkers(!showMarkers)}
+            sx={{
+              bgcolor: showMarkers ? 'action.selected' : 'transparent',
+              border: '1px solid',
+              borderColor: 'divider',
+            }}
+          >
+            {showMarkers ? <VisibilityIcon fontSize="small" /> : <VisibilityOffIcon fontSize="small" />}
+          </IconButton>
+        </Tooltip>
       </Stack>
 
       {/* Image container */}
@@ -140,7 +154,7 @@ export const ScanViewer: React.FC<ScanViewerProps> = ({
             />
 
             {/* Bounding boxes — only visible for active finding */}
-            {imageDims && findingsWithIndex.map((f) => {
+            {showMarkers && imageDims && findingsWithIndex.map((f) => {
               const bbox = f.bbox_norm;
               if (!bbox) return null;
               const [x, y, w, h] = bbox;
@@ -173,7 +187,7 @@ export const ScanViewer: React.FC<ScanViewerProps> = ({
             })}
 
             {/* Numbered pin markers at center of each bbox */}
-            {imageDims && findingsWithIndex.map((f) => {
+            {showMarkers && imageDims && findingsWithIndex.map((f) => {
               const bbox = f.bbox_norm;
               if (!bbox) return null;
               const [x, y, w, h] = bbox;
@@ -237,7 +251,7 @@ export const ScanViewer: React.FC<ScanViewerProps> = ({
             })}
 
             {/* Findings without bbox — show as floating pins at edges */}
-            {imageDims && findingsWithIndex.map((f, idx) => {
+            {showMarkers && imageDims && findingsWithIndex.map((f, idx) => {
               if (f.bbox_norm) return null;
               const color = SEVERITY_COLOR[f.severity] || '#6b7280';
               const isActive = activeIdx === f._i;

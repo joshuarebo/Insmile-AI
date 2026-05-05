@@ -19,12 +19,12 @@ export const scans = {
     return data;
   },
 
-  getImage: async (scanId: string) => {
-    const { data } = await axios.get(`${API_URL}/scans/${scanId}/image`, {
-      responseType: 'blob',
-    });
-    return URL.createObjectURL(data as Blob);
+  getImageUrl: async (scanId: string): Promise<string | null> => {
+    try {
+      const { data } = await axios.get(`${API_URL}/scans/${scanId}/image`);
+      return data.url || null;
+    } catch {
+      return null;
+    }
   },
 };
-
-export {};

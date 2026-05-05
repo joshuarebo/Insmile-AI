@@ -16,7 +16,7 @@ import {
 import { scans } from '../services/scans';
 import { patients as patientsApi } from '../services/api';
 import AIAnalysis from '../components/AIAnalysis';
-import { scanImageUrl } from '../services/ai';
+import { ScanThumbnail } from '../components/ScanThumbnail';
 
 const Scans: React.FC = () => {
   const [selectedPatientId, setSelectedPatientId] = useState('');
@@ -89,7 +89,7 @@ const Scans: React.FC = () => {
               <MenuItem value="">Select a patient</MenuItem>
               {patients.map((p: any) => (
                 <MenuItem key={p.id} value={p.id}>
-                  {p.name || p.fullName || p.id}
+                  {p.full_name || p.id}
                 </MenuItem>
               ))}
             </TextField>
@@ -163,30 +163,23 @@ const Scans: React.FC = () => {
                       '&:hover': { borderColor: 'primary.light' },
                     }}
                   >
-                    <Box sx={{ aspectRatio: '16/10', overflow: 'hidden', bgcolor: '#0b1220' }}>
-                      <img
-                        src={scanImageUrl(scan.id)}
-                        alt="scan"
-                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                      />
+                    <Box sx={{ height: 160, overflow: 'hidden', bgcolor: '#0b1220', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <ScanThumbnail scanId={scan.id} maxHeight={160} />
                     </Box>
                     <CardContent sx={{ pt: 1.5, pb: '12px !important' }}>
                       <Stack direction="row" justifyContent="space-between" alignItems="center">
                         <Typography variant="caption" color="text.secondary">
-                          {new Date(scan.createdAt).toLocaleString()}
+                          {scan.created_at ? new Date(scan.created_at).toLocaleDateString() + ' ' + new Date(scan.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}
                         </Typography>
-                        <Chip
-                          size="small"
-                          label={scan.status || 'uploaded'}
-                          color={
-                            scan.status === 'analyzed'
-                              ? 'success'
-                              : scan.status === 'failed'
-                              ? 'error'
-                              : 'default'
-                          }
-                        />
+                        {scan.scan_type && scan.scan_type !== 'unknown' && (
+                          <Chip size="small" label={scan.scan_type} variant="outlined" />
+                        )}
                       </Stack>
+                      {scan.file_name && (
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {scan.file_name}
+                        </Typography>
+                      )}
                     </CardContent>
                   </Card>
                 );
