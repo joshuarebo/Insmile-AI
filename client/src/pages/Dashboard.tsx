@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import {
@@ -15,6 +16,29 @@ import PeopleAltOutlinedIcon from '@mui/icons-material/PeopleAltOutlined';
 import MedicalInformationOutlinedIcon from '@mui/icons-material/MedicalInformationOutlined';
 import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline';
 import { patients, scans } from '../services/api';
+
+const SCAN_TYPE_LABEL: Record<string, string> = {
+  xray: 'X-Ray',
+  panoramic: 'Panoramic',
+  intraoral: 'Intraoral',
+  cbct: 'CBCT',
+  unknown: 'Scan',
+};
+
+function formatDate(dateStr: string | null | undefined): string {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-KE', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function formatDateTime(dateStr: string | null | undefined): string {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-KE', { day: 'numeric', month: 'short' }) + ' · ' +
+    d.toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' });
+}
 
 const quickActions = [
   {
@@ -51,6 +75,15 @@ const Dashboard = () => {
     queryFn: scans.getAll,
     retry: 0,
   });
+
+  // Build patient name lookup for scan labels
+  const patientMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    patientData.forEach((p: any) => {
+      map[p.id] = p.full_name || 'Unknown';
+    });
+    return map;
+  }, [patientData]);
 
   return (
     <Box>
@@ -109,9 +142,10 @@ const Dashboard = () => {
       </Box>
 
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2 }}>
+        {/* Patients card */}
         <Card variant="outlined" sx={{ borderRadius: 3 }}>
           <CardContent>
-            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
+            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1.5 }}>
               <Typography variant="subtitle1" fontWeight={700}>
                 Patients
               </Typography>
@@ -126,25 +160,54 @@ const Dashboard = () => {
                 .
               </Typography>
             ) : (
-              <Stack spacing={0.75}>
+              <Stack spacing={1}>
                 {patientData.slice(0, 5).map((p: any) => (
-                  <Box key={p.id} sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <Typography variant="body2" fontWeight={500}>
-                      {p.name || p.fullName || 'Patient'}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      {p.phone || p.email || ''}
-                    </Typography>
+                  <Box
+                    key={p.id}
+                    component={Link}
+                    to={`/patients/${p.id}`}
+                    sx={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      textDecoration: 'none',
+                      color: 'inherit',
+                      p: 1,
+                      borderRadius: 1,
+                      '&:hover': { bgcolor: 'action.hover' },
+                    }}
+                  >
+                    <Box>
+                      <Typography variant="body2" fontWeight={600}>
+                        {p.full_name}
+                      </Typography>
+                      {p.phone && (
+                        <Typography variant="caption" color="text.secondary">
+                          {p.phone}
+                        </Typography>
+                      )}
+                    </Box>
+                    {p.date_of_birth && (
+                      <Typography variant="caption" color="text.secondary">
+                        DOB: {formatDate(p.date_of_birth)}
+                      </Typography>
+                    )}
                   </Box>
                 ))}
+                {patientData.length > 5 && (
+                  <Typography variant="caption" color="primary" component={Link} to="/patients" sx={{ textDecoration: 'none', mt: 0.5 }}>
+                    View all {patientData.length} patients →
+                  </Typography>
+                )}
               </Stack>
             )}
           </CardContent>
         </Card>
 
+        {/* Recent scans card */}
         <Card variant="outlined" sx={{ borderRadius: 3 }}>
           <CardContent>
-            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
+            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1.5 }}>
               <Typography variant="subtitle1" fontWeight={700}>
                 Recent scans
               </Typography>
@@ -158,17 +221,47 @@ const Dashboard = () => {
                 </Typography>
               </Stack>
             ) : (
-              <Stack spacing={0.75}>
-                {scanData.slice(0, 5).map((s: any) => (
-                  <Box key={s.id} sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <Typography variant="body2" fontWeight={500}>
-                      {s.fileName || 'Scan'}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      {new Date(s.createdAt || s.uploadedAt).toLocaleDateString()}
-                    </Typography>
-                  </Box>
-                ))}
+              <Stack spacing={1}>
+                {scanData.slice(0, 5).map((s: any) => {
+                  const patientName = patientMap[s.patient_id] || 'Unassigned';
+                  const scanLabel = SCAN_TYPE_LABEL[s.scan_type] || 'Scan';
+                  return (
+                    <Box
+                      key={s.id}
+                      component={Link}
+                      to={s.patient_id ? `/patients/${s.patient_id}` : '/scans'}
+                      sx={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        textDecoration: 'none',
+                        color: 'inherit',
+                        p: 1,
+                        borderRadius: 1,
+                        '&:hover': { bgcolor: 'action.hover' },
+                      }}
+                    >
+                      <Box>
+                        <Typography variant="body2" fontWeight={600}>
+                          {scanLabel} — {patientName}
+                        </Typography>
+                        {s.file_name && (
+                          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {s.file_name}
+                          </Typography>
+                        )}
+                      </Box>
+                      <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap', ml: 1 }}>
+                        {formatDateTime(s.created_at)}
+                      </Typography>
+                    </Box>
+                  );
+                })}
+                {scanData.length > 5 && (
+                  <Typography variant="caption" color="primary" component={Link} to="/scans" sx={{ textDecoration: 'none', mt: 0.5 }}>
+                    View all {scanData.length} scans →
+                  </Typography>
+                )}
               </Stack>
             )}
           </CardContent>
