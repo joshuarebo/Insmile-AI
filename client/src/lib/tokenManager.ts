@@ -1,24 +1,28 @@
 import { supabase } from './supabase';
 
 let currentToken: string | null = null;
-let sessionReady: Promise<void>;
-let resolveSessionReady: () => void;
+let tokenResolvers: Array<(token: string | null) => void> = [];
+let initialized = false;
 
-// Create a promise that resolves once the first session check completes
-sessionReady = new Promise((resolve) => {
-  resolveSessionReady = resolve;
-});
+function notifyWaiters() {
+  if (currentToken && tokenResolvers.length > 0) {
+    tokenResolvers.forEach((resolve) => resolve(currentToken));
+    tokenResolvers = [];
+  }
+}
 
-// Initialize: check for existing session immediately
+// Initialize: check for existing session
 supabase.auth.getSession().then(({ data: { session } }) => {
   currentToken = session?.access_token ?? null;
-  resolveSessionReady();
+  initialized = true;
+  notifyWaiters();
 });
 
 // Keep token in sync with auth state changes
 supabase.auth.onAuthStateChange((_event, session) => {
   currentToken = session?.access_token ?? null;
-  resolveSessionReady();
+  initialized = true;
+  notifyWaiters();
 });
 
 export function getToken(): string | null {
@@ -26,6 +30,17 @@ export function getToken(): string | null {
 }
 
 export async function waitForToken(): Promise<string | null> {
-  await sessionReady;
-  return currentToken;
+  // If we already have a token, return immediately
+  if (currentToken) return currentToken;
+
+  // If already initialized but no token, user isn't logged in
+  if (initialized) return null;
+
+  // Wait for either a token to arrive or a timeout (3s)
+  return new Promise((resolve) => {
+    tokenResolvers.push(resolve);
+    setTimeout(() => {
+      resolve(currentToken);
+    }, 3000);
+  });
 }

@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
+import { getToken } from '../lib/tokenManager';
 
 interface Profile {
   id: string;
@@ -47,7 +48,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       .from('profiles')
       .select('*')
       .eq('id', userId)
-      .single();
+      .maybeSingle();
 
     if (profileData) {
       setProfile(profileData);
@@ -55,8 +56,27 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         .from('companies')
         .select('*')
         .eq('id', profileData.company_id)
-        .single();
+        .maybeSingle();
       if (companyData) setCompany(companyData);
+    } else {
+      // Profile doesn't exist yet (trigger didn't fire).
+      // Hit the backend /auth/me endpoint to trigger self-healing ensureProfile().
+      const token = getToken();
+      if (token) {
+        const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001/api';
+        try {
+          const res = await fetch(`${API_URL}/auth/me`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.profile) setProfile(data.profile);
+            if (data.company) setCompany(data.company);
+          }
+        } catch {
+          // Backend unavailable — profile will be created on next request
+        }
+      }
     }
   }, []);
 
