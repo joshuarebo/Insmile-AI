@@ -11,17 +11,16 @@ function parseList(env, fallback) {
 }
 
 const TEXT_MODELS = parseList('OPENROUTER_TEXT_MODELS', [
-  process.env.OPENROUTER_TEXT_MODEL || 'openai/gpt-oss-120b:free',
-  'z-ai/glm-4.5-air:free',
-  'openrouter/free',
+  process.env.OPENROUTER_TEXT_MODEL || 'meta-llama/llama-3.3-70b-instruct:free',
+  'openai/gpt-oss-120b:free',
   'google/gemma-3-27b-it:free',
-  'meta-llama/llama-3.3-70b-instruct:free',
+  'z-ai/glm-4.5-air:free',
 ]);
 const VISION_MODELS = parseList('OPENROUTER_VISION_MODELS', [
-  process.env.OPENROUTER_VISION_MODEL || 'nvidia/nemotron-nano-12b-v2-vl:free',
-  'google/gemma-3-27b-it:free',
+  process.env.OPENROUTER_VISION_MODEL || 'google/gemma-3-27b-it:free',
   'google/gemma-4-26b-a4b-it:free',
-  'openrouter/free',
+  'meta-llama/llama-4-maverick:free',
+  'nvidia/nemotron-nano-12b-v2-vl:free',
 ]);
 
 const TEXT_MODEL = TEXT_MODELS[0];
@@ -166,38 +165,96 @@ async function toBase64(imageInput) {
     throw new Error('Unsupported image input');
   }
   const optimized = await sharp(buffer)
-    .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
-    .jpeg({ quality: 88 })
+    .resize(1536, 1536, { fit: 'inside', withoutEnlargement: true })
+    .jpeg({ quality: 92 })
     .toBuffer();
   return optimized.toString('base64');
 }
 
-const VISION_SYSTEM_PROMPT = `You are a dental AI assistant trained to analyze 2D dental X-rays and intraoral photos for a clinic in Kenya. You must be concise, clinical, and cautious. Always use standard FDI or Universal tooth numbering when possible.
+const VISION_SYSTEM_PROMPT = `You are an expert dental radiologist AI performing diagnostic analysis of dental X-rays (periapical, bitewing, panoramic/OPG, and CBCT slices) and intraoral photographs for a dental clinic in Kenya. You have deep training in oral radiology and pathology.
 
-Output STRICT JSON only (no prose, no markdown fencing) matching this schema:
+## WHAT TO LOOK FOR
+
+Systematically evaluate the image for these pathologies:
+
+**Caries (decay)**
+- Interproximal caries: dark shadows at contact points between teeth
+- Occlusal caries: radiolucency on biting surfaces
+- Cervical/root caries: radiolucency at or below the CEJ
+- Recurrent caries: radiolucency around existing restorations
+- Grade: incipient (enamel only) → moderate (into dentin) → severe (near/into pulp)
+
+**Periodontal disease**
+- Horizontal bone loss: uniform reduction in alveolar bone height
+- Vertical/angular bone loss: localized defects on one side of a tooth
+- Furcation involvement: radiolucency in the furcation area of molars
+- Widened PDL space: early sign of inflammation or trauma
+
+**Periapical pathology**
+- Periapical radiolucency: dark area at root apex (abscess, granuloma, or cyst)
+- Periapical condensing osteitis: radiopaque area at apex (chronic low-grade infection)
+
+**Restorations & prosthetics**
+- Overhanging restorations
+- Open margins
+- Fractured restorations
+- Ill-fitting crowns or bridges
+
+**Other**
+- Impacted teeth (especially third molars)
+- Root fractures
+- Root resorption (internal or external)
+- Calculus deposits (radiopaque along root surfaces)
+- Supernumerary teeth
+- Dental fluorosis patterns (common in Kenya's Rift Valley)
+- Tooth erosion or attrition
+
+## FDI TOOTH NUMBERING (use this system)
+- Upper right: 11-18 (central incisor to third molar)
+- Upper left: 21-28
+- Lower left: 31-38
+- Lower right: 41-48
+- For panoramic X-rays: the patient's right side appears on the LEFT of the image
+
+## BOUNDING BOX INSTRUCTIONS
+- bbox_norm = [x, y, width, height] as DECIMALS between 0.0 and 1.0
+- x,y = top-left corner of the box relative to image dimensions
+- width,height = size of the box relative to image dimensions
+- Example: a finding on a lower-right molar might be [0.6, 0.7, 0.12, 0.15]
+- The box should tightly surround the pathology, not the entire tooth
+- NEVER use [0,0,1,1]. NEVER use pixel values. ALL values must be 0.0-1.0.
+- If you cannot locate a finding precisely, use your best estimate
+
+## OUTPUT FORMAT — STRICT JSON ONLY
+
 {
   "findings": [
     {
-      "label": "short clinical finding (e.g. 'Occlusal caries on tooth 36')",
-      "tooth": "FDI tooth number string if identifiable (e.g. '36') else null",
+      "label": "specific clinical finding (e.g. 'Mesial caries on 36 extending into dentin')",
+      "tooth": "FDI number as string (e.g. '36') or null if not identifiable",
       "severity": "mild" | "moderate" | "severe",
       "confidence": 0.0-1.0,
-      "bbox_norm": [x, y, w, h]  // normalized 0..1 coordinates relative to the image, x/y is top-left
+      "bbox_norm": [x, y, w, h]
     }
   ],
-  "overall": "one or two sentence summary",
+  "overall": "concise clinical summary in 1-2 sentences",
   "confidence": 0.0-1.0,
-  "recommendations": ["short actionable recommendation", ...],
+  "recommendations": ["specific actionable recommendation", ...],
   "image_quality": "good" | "fair" | "poor"
 }
 
-Rules:
-- Produce 1-5 findings MAX. Keep total response short so it fits in 2000 tokens.
-- "bbox_norm" MUST be 4 decimal numbers between 0 and 1 (normalized coordinates, NOT pixels). Example: [0.35, 0.55, 0.15, 0.2] meaning x=35% from left, y=55% from top, width=15%, height=20%.
-- Never return [0,0,1,1]. Never return pixel values like [500, 800, 120, 150].
-- If the image is not a dental scan, return {"findings": [], "overall": "Image does not appear to be a dental scan.", "confidence": 0.2, "recommendations": [], "image_quality": "poor"}.
-- Keep labels under 70 characters. Keep "overall" under 200 characters.
-- Respond with JSON ONLY. No markdown fencing, no preamble, no explanation.`;
+## RULES
+- Report 1-6 findings maximum, ordered by clinical severity (most severe first)
+- Be SPECIFIC in labels: "Mesial caries on 36 into dentin" NOT "Cavity detected"
+- Severity grading: mild = enamel/early, moderate = dentin involvement, severe = pulp/periapical/advanced
+- Confidence: 0.9+ only for very clear pathology; use 0.5-0.7 for subtle findings
+- If the image is not a dental scan, return empty findings with appropriate overall message
+- Do NOT hallucinate findings. If unsure, lower the confidence score rather than omitting
+- Respond with RAW JSON ONLY. No markdown fencing, no preamble, no explanation, no trailing text.`;
+
+const VISION_USER_PROMPT = `Analyze this dental radiograph/image. Identify all visible pathology using FDI tooth numbering. For each finding, provide a precise bounding box around the specific area of concern.
+
+Important: Return ONLY the JSON object as specified. No other text.`;
 
 async function analyzeScan(imageInput) {
   const b64 = await toBase64(imageInput);
@@ -208,10 +265,7 @@ async function analyzeScan(imageInput) {
     {
       role: 'user',
       content: [
-        {
-          type: 'text',
-          text: 'Analyze this dental scan and return the JSON described in the system prompt. JSON ONLY, no preamble.',
-        },
+        { type: 'text', text: VISION_USER_PROMPT },
         { type: 'image_url', image_url: { url: dataUrl } },
       ],
     },
@@ -223,13 +277,21 @@ async function analyzeScan(imageInput) {
   let lastErr;
   for (const model of VISION_MODELS) {
     try {
-      const { text } = await callOpenRouter([model], messages, { temperature: 0.2, maxTokens: 3000 });
+      const { text } = await callOpenRouter([model], messages, { temperature: 0.15, maxTokens: 3500 });
       lastRaw = text;
       lastModel = model;
       const parsed = extractJson(text);
       if (parsed && Array.isArray(parsed.findings)) {
         return finalizeAnalysis(parsed, model, 'openrouter');
       }
+
+      // Two-pass fallback: if model returned prose instead of JSON, ask a text model to extract
+      if (text && text.length > 50) {
+        console.warn(`[vision] ${model} returned prose, attempting JSON extraction via text model`);
+        const extractResult = await extractFindingsFromProse(text, dataUrl);
+        if (extractResult) return extractResult;
+      }
+
       console.warn(`[vision] ${model} returned unparseable response, trying next model`);
     } catch (err) {
       lastErr = err;
@@ -241,7 +303,7 @@ async function analyzeScan(imageInput) {
   if (googleai.isConfigured()) {
     console.warn('[provider] OpenRouter vision exhausted, falling back to Google AI Studio');
     try {
-      const { text, model } = await googleai.visionCompletion(messages, { temperature: 0.2, maxTokens: 3000 });
+      const { text, model } = await googleai.visionCompletion(messages, { temperature: 0.15, maxTokens: 3500 });
       lastRaw = text;
       lastModel = model;
       const parsed = extractJson(text);
@@ -268,32 +330,84 @@ async function analyzeScan(imageInput) {
   };
 }
 
+async function extractFindingsFromProse(proseText, dataUrl) {
+  const extractPrompt = `A dental AI analyzed an X-ray and produced the following description. Convert it into the exact JSON format specified below. Use FDI tooth numbering.
+
+DESCRIPTION FROM VISION MODEL:
+${proseText.slice(0, 2000)}
+
+OUTPUT FORMAT (strict JSON, no other text):
+{
+  "findings": [{"label": "specific finding", "tooth": "FDI number or null", "severity": "mild|moderate|severe", "confidence": 0.0-1.0, "bbox_norm": [x, y, w, h]}],
+  "overall": "1-2 sentence summary",
+  "confidence": 0.0-1.0,
+  "recommendations": ["action item"],
+  "image_quality": "good|fair|poor"
+}
+
+For bbox_norm: estimate approximate positions based on standard dental X-ray anatomy. Values must be 0.0-1.0. JSON ONLY.`;
+
+  try {
+    const { text, model } = await callOpenRouter(TEXT_MODELS, [
+      { role: 'system', content: 'You convert dental analysis descriptions into structured JSON. Output ONLY valid JSON.' },
+      { role: 'user', content: extractPrompt },
+    ], { temperature: 0.1, maxTokens: 2500 });
+
+    const parsed = extractJson(text);
+    if (parsed && Array.isArray(parsed.findings) && parsed.findings.length > 0) {
+      return finalizeAnalysis(parsed, model, 'openrouter-extract');
+    }
+  } catch (err) {
+    console.warn(`[extract] JSON extraction failed: ${err.message}`);
+  }
+  return null;
+}
+
 function normalizeBbox(bbox) {
-  if (!Array.isArray(bbox) || bbox.length !== 4) return [0.3, 0.3, 0.2, 0.2];
-  const nums = bbox.map((n) => Number(n) || 0);
-  // If any value > 1, treat the whole bbox as pixel coordinates (likely over 1024 after resize)
+  if (!Array.isArray(bbox) || bbox.length !== 4) return null;
+  let nums = bbox.map((n) => Number(n) || 0);
+
+  // If all zeros or [0,0,1,1] (lazy output), reject
+  if (nums.every(n => n === 0)) return null;
+  if (nums[0] === 0 && nums[1] === 0 && nums[2] === 1 && nums[3] === 1) return null;
+
+  // If any value > 1, treat as pixel coordinates (likely 1024x1024 after resize)
   const maxVal = Math.max(...nums.map(Math.abs));
   if (maxVal > 1) {
-    // Assume max dimension is 1024 (our resize target). Normalize conservatively.
     const scale = maxVal > 1024 ? maxVal : 1024;
-    return nums.map((n) => Math.max(0, Math.min(1, n / scale)));
+    nums = nums.map((n) => n / scale);
   }
-  return nums.map((n) => Math.max(0, Math.min(1, n)));
+
+  // Clamp to valid range
+  nums = nums.map((n) => Math.max(0, Math.min(1, n)));
+
+  // Sanity: width/height should be reasonable (not too tiny, not too large)
+  const [x, y, w, h] = nums;
+  if (w < 0.02 || h < 0.02) return null; // too tiny to be meaningful
+  if (w > 0.8 && h > 0.8) return null; // covers entire image — useless
+
+  // Ensure box doesn't extend beyond image
+  return [
+    Math.min(x, 1 - w),
+    Math.min(y, 1 - h),
+    w,
+    h,
+  ];
 }
 
 function finalizeAnalysis(parsed, usedModel, providerUsed) {
-  // Sanitize bboxes & severity
   parsed.findings = parsed.findings
     .filter((f) => f && f.label)
     .map((f) => {
       const bbox = normalizeBbox(f.bbox_norm);
       const sev = ['mild', 'moderate', 'severe'].includes(f.severity) ? f.severity : 'moderate';
+      const conf = typeof f.confidence === 'number' ? Math.min(1, Math.max(0, f.confidence)) : 0.7;
       return {
-        label: String(f.label).slice(0, 100),
-        tooth: f.tooth ?? null,
+        label: String(f.label).slice(0, 120),
+        tooth: f.tooth ? String(f.tooth).replace(/[^0-9]/g, '').slice(0, 2) || null : null,
         severity: sev,
-        confidence: typeof f.confidence === 'number' ? f.confidence : 0.75,
-        bbox_norm: bbox,
+        confidence: conf,
+        bbox_norm: bbox, // null if bbox was invalid — frontend handles gracefully
       };
     })
     .slice(0, 8);
