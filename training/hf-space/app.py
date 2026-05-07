@@ -3,6 +3,8 @@ import json
 import os
 from io import BytesIO
 
+os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
+
 import gradio as gr
 import torch
 from PIL import Image
@@ -13,10 +15,10 @@ from transformers import AutoProcessor, Qwen2VLForConditionalGeneration
 MODEL_ID = "Qwen/Qwen2-VL-2B-Instruct"
 ADAPTER_ID = "joshuarebo/insmile-dental-vision-lora"
 
-print("Loading model...")
+print("Loading model in float16 to reduce memory...")
 model = Qwen2VLForConditionalGeneration.from_pretrained(
     MODEL_ID,
-    torch_dtype=torch.float32,
+    torch_dtype=torch.float16,
     device_map="cpu",
     low_cpu_mem_usage=True,
 )
@@ -26,7 +28,7 @@ model = model.merge_and_unload()
 model.eval()
 print("Loading processor...")
 processor = AutoProcessor.from_pretrained(MODEL_ID)
-print("Model ready.")
+print("Model ready!")
 
 SYSTEM_PROMPT = """You are an expert dental radiologist AI. Analyze the dental X-ray and return a JSON object with your findings.
 
@@ -41,6 +43,13 @@ USER_PROMPT = "Analyze this dental radiograph. Identify all visible pathology us
 def analyze_image(image):
     if image is None:
         return json.dumps({"error": "No image provided"})
+
+    if isinstance(image, str):
+        if "base64," in image:
+            image = image.split("base64,")[1]
+        image = Image.open(BytesIO(base64.b64decode(image))).convert("RGB")
+
+    image = image.resize((448, 448))
 
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -85,18 +94,6 @@ def analyze_image(image):
     return output
 
 
-def api_analyze(image_b64: str) -> str:
-    """API endpoint: accepts base64 image, returns model output."""
-    if not image_b64:
-        return json.dumps({"error": "No image provided"})
-
-    if "base64," in image_b64:
-        image_b64 = image_b64.split("base64,")[1]
-
-    image = Image.open(BytesIO(base64.b64decode(image_b64))).convert("RGB")
-    return analyze_image(image)
-
-
 with gr.Blocks(title="Insmile Dental Vision") as demo:
     gr.Markdown("# Insmile Dental Vision AI\nUpload a dental X-ray for analysis.")
 
@@ -106,11 +103,6 @@ with gr.Blocks(title="Insmile Dental Vision") as demo:
 
     btn = gr.Button("Analyze", variant="primary")
     btn.click(fn=analyze_image, inputs=img_input, outputs=output)
-
-    # API endpoint for programmatic access
-    api_input = gr.Textbox(visible=False)
-    api_output = gr.Textbox(visible=False)
-    api_fn = demo.load(fn=None, inputs=None, outputs=None)
 
 demo.queue()
 demo.launch(server_name="0.0.0.0", server_port=7860)

@@ -20,20 +20,50 @@ function getMode() {
 }
 
 async function callGradioApi(b64Image) {
-  const url = `${HF_ENDPOINT_URL}/api/predict`;
+  const callUrl = `${HF_ENDPOINT_URL}/gradio_api/call/analyze_image`;
   const headers = { 'Content-Type': 'application/json' };
   if (HF_API_TOKEN) headers.Authorization = `Bearer ${HF_API_TOKEN}`;
 
   const maxRetries = 3;
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
-      const { data } = await axios.post(url, {
-        data: [`data:image/jpeg;base64,${b64Image}`],
-        fn_index: 0,
-      }, { headers, timeout: HF_TIMEOUT });
+      const { data } = await axios.post(callUrl, {
+        data: [{ url: `data:image/jpeg;base64,${b64Image}` }],
+      }, { headers, timeout: 30000 });
 
-      const text = data?.data?.[0] || '';
-      return text;
+      const eventId = data?.event_id;
+      if (!eventId) throw new Error('No event_id returned from Gradio');
+
+      const resultUrl = `${callUrl}/${eventId}`;
+      const { data: sseData } = await axios.get(resultUrl, {
+        headers,
+        timeout: HF_TIMEOUT,
+        responseType: 'text',
+      });
+
+      const lines = sseData.split('\n');
+      let lastEvent = '';
+      for (const line of lines) {
+        if (line.startsWith('event: ')) lastEvent = line.slice(7).trim();
+        if (line.startsWith('data: ') && lastEvent === 'complete') {
+          const payload = line.slice(6);
+          try {
+            const parsed = JSON.parse(payload);
+            if (Array.isArray(parsed)) return parsed[0] || '';
+            return typeof parsed === 'string' ? parsed : JSON.stringify(parsed);
+          } catch {}
+        }
+        if (line.startsWith('data: ') && lastEvent === 'error') {
+          const payload = line.slice(6);
+          try {
+            const parsed = JSON.parse(payload);
+            throw new Error(parsed.error || 'Gradio returned error');
+          } catch (e) {
+            if (e.message !== 'Unexpected') throw e;
+          }
+        }
+      }
+      throw new Error('No valid data in Gradio SSE response');
     } catch (err) {
       const status = err.response?.status;
       if (status === 503 || status === 429 || status === 502) {
