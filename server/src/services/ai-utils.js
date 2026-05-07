@@ -57,22 +57,33 @@ function normalizeBbox(bbox) {
   return [Math.min(x, 1 - w), Math.min(y, 1 - h), w, h];
 }
 
+function deduplicateFindings(findings) {
+  const seen = new Set();
+  return findings.filter((f) => {
+    const key = `${f.label}|${f.tooth}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function finalizeAnalysis(parsed, usedModel, providerUsed) {
-  parsed.findings = parsed.findings
-    .filter((f) => f && f.label)
-    .map((f) => {
-      const bbox = normalizeBbox(f.bbox_norm);
-      const sev = ['mild', 'moderate', 'severe'].includes(f.severity) ? f.severity : 'moderate';
-      const conf = typeof f.confidence === 'number' ? Math.min(1, Math.max(0, f.confidence)) : 0.7;
-      return {
-        label: String(f.label).slice(0, 120),
-        tooth: f.tooth ? String(f.tooth).replace(/[^0-9]/g, '').slice(0, 2) || null : null,
-        severity: sev,
-        confidence: conf,
-        bbox_norm: bbox,
-      };
-    })
-    .slice(0, 8);
+  parsed.findings = deduplicateFindings(
+    parsed.findings
+      .filter((f) => f && f.label)
+      .map((f) => {
+        const bbox = normalizeBbox(f.bbox_norm);
+        const sev = ['mild', 'moderate', 'severe'].includes(f.severity) ? f.severity : 'moderate';
+        const conf = typeof f.confidence === 'number' ? Math.min(1, Math.max(0, f.confidence)) : 0.7;
+        return {
+          label: String(f.label).slice(0, 120),
+          tooth: f.tooth ? String(f.tooth).replace(/[^0-9]/g, '').slice(0, 2) || null : null,
+          severity: sev,
+          confidence: conf,
+          bbox_norm: bbox,
+        };
+      })
+  ).slice(0, 8);
 
   return {
     findings: parsed.findings,

@@ -79,6 +79,8 @@ def analyze_image(image):
             max_new_tokens=1500,
             temperature=0.1,
             do_sample=True,
+            repetition_penalty=1.3,
+            no_repeat_ngram_size=5,
         )
 
     generated_ids_trimmed = [
