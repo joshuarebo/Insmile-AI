@@ -5,7 +5,7 @@ const HF_ENDPOINT_URL = process.env.HF_ENDPOINT_URL || 'https://joshuarebo-insmi
 const HF_API_TOKEN = process.env.HF_API_TOKEN;
 const HF_MODEL_ID = process.env.HF_MODEL_ID || 'joshuarebo/insmile-dental-vision-lora';
 const HF_TIMEOUT = parseInt(process.env.HF_TIMEOUT || '180000');
-const HF_PROVIDER_MODE = process.env.HF_PROVIDER_MODE || 'disabled';
+const HF_PROVIDER_MODE = process.env.HF_PROVIDER_MODE || 'shadow';
 
 function isConfigured() {
   return Boolean(HF_ENDPOINT_URL);
