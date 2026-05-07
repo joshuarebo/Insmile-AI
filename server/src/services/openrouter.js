@@ -1,6 +1,6 @@
 const axios = require('axios');
-const sharp = require('sharp');
 const googleai = require('./googleai');
+const { extractJson, normalizeBbox, finalizeAnalysis, toBase64 } = require('./ai-utils');
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
@@ -112,64 +112,6 @@ async function callOpenRouter(modelOrList, messages, opts = {}) {
   throw err;
 }
 
-function extractJson(text) {
-  if (!text) return null;
-  // Strip common chain-of-thought / reasoning wrappers
-  const cleaned = text
-    .replace(/<think>[\s\S]*?<\/think>/gi, '')
-    .replace(/^\s*(?:Thought|Reasoning|Analysis)\s*:.*?\n/gim, '')
-    .trim();
-
-  // 1) Try fenced code block
-  const fenced = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  if (fenced) {
-    try { return JSON.parse(fenced[1].trim()); } catch {}
-  }
-
-  // 2) Scan forward for the first '{' and try every matching '}' from longest to shortest
-  const first = cleaned.indexOf('{');
-  if (first === -1) return null;
-  const last = cleaned.lastIndexOf('}');
-  if (last <= first) return null;
-
-  // Try the widest slice first, then progressively narrow from the right
-  const slice = cleaned.slice(first, last + 1);
-  try { return JSON.parse(slice); } catch {}
-
-  // 3) Progressive right-to-left truncation — handles trailing noise after JSON
-  for (let end = last; end > first; end--) {
-    if (cleaned[end] !== '}') continue;
-    try { return JSON.parse(cleaned.slice(first, end + 1)); } catch {}
-  }
-
-  // 4) Try to fix common issues (trailing commas, single quotes)
-  try {
-    const fixed = slice
-      .replace(/,\s*([}\]])/g, '$1')        // trailing commas
-      .replace(/'/g, '"');                   // single → double quotes
-    return JSON.parse(fixed);
-  } catch {}
-
-  return null;
-}
-
-async function toBase64(imageInput) {
-  let buffer;
-  if (Buffer.isBuffer(imageInput)) {
-    buffer = imageInput;
-  } else if (typeof imageInput === 'string') {
-    buffer = imageInput.startsWith('data:')
-      ? Buffer.from(imageInput.replace(/^data:image\/\w+;base64,/, ''), 'base64')
-      : Buffer.from(imageInput, 'base64');
-  } else {
-    throw new Error('Unsupported image input');
-  }
-  const optimized = await sharp(buffer)
-    .resize(1536, 1536, { fit: 'inside', withoutEnlargement: true })
-    .jpeg({ quality: 92 })
-    .toBuffer();
-  return optimized.toString('base64');
-}
 
 const VISION_SYSTEM_PROMPT = `You are an expert dental radiologist AI performing diagnostic analysis of dental X-rays (periapical, bitewing, panoramic/OPG, and CBCT slices) and intraoral photographs for a dental clinic in Kenya. You have deep training in oral radiology and pathology.
 
@@ -363,65 +305,6 @@ For bbox_norm: estimate approximate positions based on standard dental X-ray ana
   return null;
 }
 
-function normalizeBbox(bbox) {
-  if (!Array.isArray(bbox) || bbox.length !== 4) return null;
-  let nums = bbox.map((n) => Number(n) || 0);
-
-  // If all zeros or [0,0,1,1] (lazy output), reject
-  if (nums.every(n => n === 0)) return null;
-  if (nums[0] === 0 && nums[1] === 0 && nums[2] === 1 && nums[3] === 1) return null;
-
-  // If any value > 1, treat as pixel coordinates (likely 1024x1024 after resize)
-  const maxVal = Math.max(...nums.map(Math.abs));
-  if (maxVal > 1) {
-    const scale = maxVal > 1024 ? maxVal : 1024;
-    nums = nums.map((n) => n / scale);
-  }
-
-  // Clamp to valid range
-  nums = nums.map((n) => Math.max(0, Math.min(1, n)));
-
-  // Sanity: width/height should be reasonable (not too tiny, not too large)
-  const [x, y, w, h] = nums;
-  if (w < 0.02 || h < 0.02) return null; // too tiny to be meaningful
-  if (w > 0.8 && h > 0.8) return null; // covers entire image — useless
-
-  // Ensure box doesn't extend beyond image
-  return [
-    Math.min(x, 1 - w),
-    Math.min(y, 1 - h),
-    w,
-    h,
-  ];
-}
-
-function finalizeAnalysis(parsed, usedModel, providerUsed) {
-  parsed.findings = parsed.findings
-    .filter((f) => f && f.label)
-    .map((f) => {
-      const bbox = normalizeBbox(f.bbox_norm);
-      const sev = ['mild', 'moderate', 'severe'].includes(f.severity) ? f.severity : 'moderate';
-      const conf = typeof f.confidence === 'number' ? Math.min(1, Math.max(0, f.confidence)) : 0.7;
-      return {
-        label: String(f.label).slice(0, 120),
-        tooth: f.tooth ? String(f.tooth).replace(/[^0-9]/g, '').slice(0, 2) || null : null,
-        severity: sev,
-        confidence: conf,
-        bbox_norm: bbox, // null if bbox was invalid — frontend handles gracefully
-      };
-    })
-    .slice(0, 8);
-
-  return {
-    findings: parsed.findings,
-    overall: parsed.overall || 'Analysis complete.',
-    confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.7,
-    recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations.slice(0, 8) : [],
-    image_quality: parsed.image_quality || 'fair',
-    model: usedModel,
-    provider: providerUsed || 'openrouter',
-  };
-}
 
 const KENYA_CLINICAL_CONTEXT = `You are Insmile, a dental AI assistant helping a dentist in Kenya. Tailor recommendations to Kenyan patients:
 - Price procedures in Kenyan Shillings (KES), giving realistic ranges for (a) public/county hospital, (b) mid-tier private clinic, (c) premium private clinic in Nairobi/Mombasa.

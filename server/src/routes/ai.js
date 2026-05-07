@@ -3,6 +3,7 @@ const multer = require('multer');
 const path = require('path');
 
 const ai = require('../services/ai');
+const huggingface = require('../services/huggingface');
 const { supabaseAdmin } = require('../lib/supabase');
 const { requireAuth } = require('../middleware/auth');
 
@@ -85,7 +86,8 @@ async function getScanImageBuffer(scanId, companyId) {
 }
 
 // ---------- Health / config (public) ----------
-router.get('/health', (_req, res) => {
+router.get('/health', async (_req, res) => {
+  const hfStatus = await huggingface.getStatus();
   res.json({
     status: 'ok',
     provider: ai.AI_CONFIG.PROVIDER,
@@ -95,7 +97,10 @@ router.get('/health', (_req, res) => {
       vision: ai.AI_CONFIG.VISION_MODEL,
       fallback_text: ai.AI_CONFIG.FALLBACK_TEXT_MODEL,
       fallback_vision: ai.AI_CONFIG.FALLBACK_VISION_MODEL,
+      huggingface: ai.AI_CONFIG.HF_MODEL,
     },
+    hfMode: ai.AI_CONFIG.HF_MODE,
+    hfStatus,
     aiAvailable: ai.isConfigured(),
     realTimeAvailable: ai.isConfigured(),
     timestamp: new Date().toISOString(),
